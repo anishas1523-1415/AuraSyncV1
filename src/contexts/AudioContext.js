@@ -202,6 +202,7 @@ export function AudioProvider({ children }) {
   const audioRef = useRef(null);
   const ytPlayerRef = useRef(null);
   const pollIntervalRef = useRef(null);
+  const currentIsHtmlRef = useRef(false);
 
   // Maintain refs to avoid stale closure scopes in YT player callbacks
   const currentTrackRef = useRef(null);
@@ -429,27 +430,76 @@ export function AudioProvider({ children }) {
       
       fetchLyricsFromApi(track.title, track.artist, track.id);
 
-      const loadVideo = () => {
-        if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
+      // Decide whether this is a direct audio URL (mp3) or a YouTube video.
+      const isDirectAudio = track.url && /\.mp3($|\?)/i.test(track.url);
+      currentIsHtmlRef.current = isDirectAudio;
+
+      if (isDirectAudio) {
+        // Pause any YT playback
+        try {
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
+            ytPlayerRef.current.pauseVideo();
+          }
+        } catch (err) {
+          // ignore
+        }
+
+        // Use HTMLAudioElement for direct audio
+        setTimeout(() => {
           try {
-            ytPlayerRef.current.loadVideoById({ videoId: track.id });
-            if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
-              setTimeout(() => {
-                try {
-                  ytPlayerRef.current?.playVideo();
-                } catch (err) {
-                  console.warn("YT play after load failed:", err);
-                }
-              }, 100);
+            if (audioRef.current) {
+              audioRef.current.src = track.url;
+              audioRef.current.currentTime = 0;
+              if (shouldAutoPlay) {
+                audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+              }
+              setIsBuffering(false);
             }
           } catch (err) {
-            console.error("YT Player load error:", err);
+            console.warn('Direct audio playback failed:', err);
           }
-        } else {
-          setTimeout(loadVideo, 250);
-        }
-      };
-      loadVideo();
+        }, 50);
+      } else {
+        // Try to extract a YouTube video id from url if id looks non-standard
+        const extractYoutubeId = (t) => {
+          if (!t) return null;
+          if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
+          if (t.url) {
+            const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+            if (m1 && m1[1]) return m1[1];
+            const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+            if (m2 && m2[1]) return m2[1];
+          }
+          return t.id || null;
+        };
+
+        const videoId = extractYoutubeId(track);
+        const loadVideo = () => {
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
+            try {
+              if (videoId) {
+                ytPlayerRef.current.loadVideoById({ videoId });
+              } else if (track.id) {
+                ytPlayerRef.current.loadVideoById({ videoId: track.id });
+              }
+              if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
+                setTimeout(() => {
+                  try {
+                    ytPlayerRef.current?.playVideo();
+                  } catch (err) {
+                    console.warn("YT play after load failed:", err);
+                  }
+                }, 100);
+              }
+            } catch (err) {
+              console.error("YT Player load error:", err);
+            }
+          } else {
+            setTimeout(loadVideo, 250);
+          }
+        };
+        loadVideo();
+      }
     } else {
       setIsPlaying(shouldAutoPlay);
     }
@@ -457,12 +507,32 @@ export function AudioProvider({ children }) {
 
   const togglePlay = () => {
     if (currentTrack) {
-      setIsPlaying(!isPlaying);
+      // If current track is direct HTML audio, control audio element directly
+      if (currentIsHtmlRef.current && audioRef.current) {
+        if (isPlaying) {
+          audioRef.current.pause();
+          setIsPlaying(false);
+        } else {
+          audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+          setIsPlaying(true);
+        }
+      } else {
+        setIsPlaying(!isPlaying);
+      }
     }
   };
 
   const seekTo = (seconds) => {
     if (!currentTrack) return;
+    if (currentIsHtmlRef.current && audioRef.current) {
+      try {
+        audioRef.current.currentTime = seconds;
+        setProgress(seconds);
+      } catch (err) {
+        console.warn('HTML audio seek failed:', err);
+      }
+      return;
+    }
     if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
       try {
         ytPlayerRef.current.seekTo(seconds, true);
@@ -478,8 +548,16 @@ export function AudioProvider({ children }) {
 
   // Sync state changes with native audio player and YT player
   useEffect(() => {
-    if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-      try {
+    try {
+      if (currentIsHtmlRef.current) {
+        if (audioRef.current) {
+          if (isPlaying) {
+            audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+          } else {
+            audioRef.current.pause();
+          }
+        }
+      } else if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
         if (isPlaying) {
           ytPlayerRef.current.playVideo();
           if (audioRef.current) {
@@ -491,31 +569,59 @@ export function AudioProvider({ children }) {
             audioRef.current.pause();
           }
         }
-      } catch (err) {
-        console.warn("Playstate sync error:", err);
       }
+    } catch (err) {
+      console.warn("Playstate sync error:", err);
     }
   }, [isPlaying, currentTrack?.id]);
 
   // Poll progress state
   useEffect(() => {
-    if (isPlaying) {
-      pollIntervalRef.current = setInterval(() => {
-        if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
-          try {
-            const curTime = ytPlayerRef.current.getCurrentTime();
-            const dur = ytPlayerRef.current.getDuration();
-            if (curTime !== undefined) setProgress(curTime);
-            if (dur !== undefined && dur > 0) setDuration(dur);
-          } catch (err) {
-            // ignore
+    // For YT player, poll; for HTML audio, use element events
+    if (currentIsHtmlRef.current) {
+      if (audioRef.current) {
+        const a = audioRef.current;
+        const timeHandler = () => {
+          setProgress(a.currentTime || 0);
+          setDuration(a.duration || 0);
+        };
+        const endHandler = () => {
+          setIsPlaying(false);
+          setProgress(0);
+          playNext();
+        };
+        a.addEventListener('timeupdate', timeHandler);
+        a.addEventListener('ended', endHandler);
+        if (!isPlaying) {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
           }
         }
-      }, 250);
+        return () => {
+          a.removeEventListener('timeupdate', timeHandler);
+          a.removeEventListener('ended', endHandler);
+        };
+      }
     } else {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      if (isPlaying) {
+        pollIntervalRef.current = setInterval(() => {
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
+            try {
+              const curTime = ytPlayerRef.current.getCurrentTime();
+              const dur = ytPlayerRef.current.getDuration();
+              if (curTime !== undefined) setProgress(curTime);
+              if (dur !== undefined && dur > 0) setDuration(dur);
+            } catch (err) {
+              // ignore
+            }
+          }
+        }, 250);
+      } else {
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
       }
     }
 
