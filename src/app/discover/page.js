@@ -18,7 +18,7 @@ export default function Discover() {
           const trackId = entry.target.dataset.trackId;
           const track = trendingTracks.find(t => t.id === trackId);
           if (track && currentTrack?.id !== track.id) {
-            playTrack(track);
+            playTrack(track, trendingTracks);
           }
         }
       });

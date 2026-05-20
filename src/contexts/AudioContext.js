@@ -275,7 +275,7 @@ export function AudioProvider({ children }) {
     const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
     if (currentIndex !== -1) {
       const nextIndex = (currentIndex + 1) % currentQ.length;
-      playTrack(currentQ[nextIndex]);
+      playTrack(currentQ[nextIndex], currentQ, isPlayingRef.current);
     }
   };
 
@@ -286,7 +286,7 @@ export function AudioProvider({ children }) {
     const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
     if (currentIndex !== -1) {
       const prevIndex = (currentIndex - 1 + currentQ.length) % currentQ.length;
-      playTrack(currentQ[prevIndex]);
+      playTrack(currentQ[prevIndex], currentQ, isPlayingRef.current);
     }
   };
 
@@ -404,7 +404,7 @@ export function AudioProvider({ children }) {
     }
   };
 
-  const playTrack = (track, newQueue = null) => {
+  const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
     // Set queue if provided, or build one
     if (newQueue) {
       setQueue(newQueue);
@@ -422,8 +422,8 @@ export function AudioProvider({ children }) {
         lyrics: track.lyrics || generateMockLyrics(track.title, track.artist)
       };
       setCurrentTrack(trackWithLyrics);
-      setIsPlaying(true);
-      setIsBuffering(true);
+      setIsPlaying(shouldAutoPlay);
+      setIsBuffering(shouldAutoPlay);
       setProgress(0);
       setDuration(0);
       
@@ -433,7 +433,7 @@ export function AudioProvider({ children }) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
           try {
             ytPlayerRef.current.loadVideoById({ videoId: track.id });
-            if (isPlayingRef.current && typeof ytPlayerRef.current.playVideo === "function") {
+            if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
               setTimeout(() => {
                 try {
                   ytPlayerRef.current?.playVideo();
@@ -451,7 +451,7 @@ export function AudioProvider({ children }) {
       };
       loadVideo();
     } else {
-      setIsPlaying(true);
+      setIsPlaying(shouldAutoPlay);
     }
   };
 

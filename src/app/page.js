@@ -8,7 +8,10 @@ import Link from "next/link";
 export default function Home() {
   // Add a special trending category
   const allCategories = [
-    ...categories,
+    ...categories.map(cat => ({
+      ...cat,
+      path: `/category/${cat.name.toLowerCase()}`
+    })),
     { id: "trending", name: "TRENDING", color: "linear-gradient(135deg, #ff0844 0%, #ffb199 100%)", path: "/trends" }
   ];
 
