@@ -330,6 +330,19 @@ export function AudioProvider({ children }) {
               // Auto-advance to next song
               playNext();
             }
+          },
+          onError: (event) => {
+            try {
+              console.warn('AuraSynq Debug: YT Player error', event.data);
+              setIsBuffering(false);
+              setIsPlaying(false);
+              // If a video is unplayable (private/region blocked), skip to next after short delay
+              setTimeout(() => {
+                playNext();
+              }, 300);
+            } catch (err) {
+              // ignore
+            }
           }
         }
       });
