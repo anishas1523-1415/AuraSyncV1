@@ -1,5 +1,4 @@
 import { SignIn } from "@clerk/nextjs";
-import { dark } from "@clerk/themes";
 
 export default function SignInPage() {
   return (
@@ -28,7 +27,6 @@ export default function SignInPage() {
         }}>Sign in to start vibing</p>
         <SignIn 
           appearance={{
-            baseTheme: dark,
             variables: {
               colorPrimary: "#a855f7",
               colorBackground: "#18181b",
