@@ -1,9 +1,10 @@
 .env.local
-.env.*
 node_modules/
 .next/
 dist/
-/.vercel# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+/.vercel
+
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
 /node_modules
@@ -35,8 +36,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# Env files
+# Keep local secret file ignored but allow committing an example file
+.env.local
+!.env.example
 
 # vercel
 .vercel
