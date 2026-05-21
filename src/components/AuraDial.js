@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkle, MagnifyingGlass, PlayCircle, Planet } from "@phosphor-icons/react/dist/ssr";
+import { Sparkle, MagnifyingGlass, PlayCircle, Planet, User } from "@phosphor-icons/react/dist/ssr";
 import styles from "./AuraDial.module.css";
 import { useState } from "react";
 
@@ -10,11 +10,13 @@ export default function AuraDial() {
   const [isOpen, setIsOpen] = useState(false);
 
   const navItems = [
-    { name: "Bubbles", href: "/", icon: Planet },
+    { name: "Home", href: "/", icon: Planet },
     { name: "Search", href: "/search", icon: MagnifyingGlass },
     { name: "Discover", href: "/discover", icon: Sparkle },
-    { name: "Aura", href: "/player", icon: PlayCircle },
+    { name: "Now Playing", href: "/player", icon: PlayCircle },
+    { name: "Profile", href: "/profile", icon: User },
   ];
+
 
   return (
     <div className={styles.dialContainer}>

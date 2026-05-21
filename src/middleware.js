@@ -9,11 +9,8 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
-  // In development we may want to bypass Clerk to speed up debugging locally.
-  // This check only runs when `NODE_ENV` is 'development' and will not affect production.
-  if (process.env.NODE_ENV === 'development') {
-    return;
-  }
+  // Always enforce protection for non-public routes. Development bypass removed
+  // to keep local and production auth behavior consistent.
   if (!isPublicRoute(req)) {
     // Protect the route and redirect to Clerk sign-in if not authenticated
     await auth.protect();

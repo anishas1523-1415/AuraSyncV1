@@ -2,7 +2,7 @@
 import styles from "./page.module.css";
 import { useEffect, useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, ArrowLeft } from "@phosphor-icons/react/dist/ssr";
+import { Play, ArrowLeft, MusicNotes } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 
 export default function Trends() {
@@ -13,23 +13,10 @@ export default function Trends() {
   useEffect(() => {
     async function fetchTamilSongs() {
       try {
-        const res = await fetch('/api/search?q=latest+tamil+hit+songs');
+        const res = await fetch("/api/search?q=latest+tamil+hit+songs");
         const data = await res.json();
-        
-        const testTrack = {
-          id: "test-mp3",
-          title: "🔊 [TEST PLAYER] Click here to test direct audio",
-          artist: "System MP3 Player Test",
-          cover: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&w=300&q=80",
-          url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-          mood: "chill",
-          hue: 200
-        };
-
         if (data.tracks) {
-          setTracks([testTrack, ...data.tracks.slice(0, 14)]);
-        } else {
-          setTracks([testTrack]);
+          setTracks(data.tracks.slice(0, 15));
         }
       } catch (e) {
         console.error(e);
@@ -46,39 +33,49 @@ export default function Trends() {
         <Link href="/" className={styles.backBtn}>
           <ArrowLeft size={24} />
         </Link>
-        <h1>Tamil Trends</h1>
-        <p>Floating hits from YouTube</p>
+        <div>
+          <h1>Tamil Trends</h1>
+          <p>Floating hits for you</p>
+        </div>
       </header>
 
       <div className={styles.spatialMap}>
         {loading && (
           <div className={styles.loader}>
-            Syncing Live Tamil Tracks...
+            <MusicNotes size={32} weight="fill" />
+            <span>Syncing Live Tamil Tracks...</span>
           </div>
         )}
-        
+
         {tracks.map((track, i) => {
-          // Generate semi-random placement
-          const size = 95 + (i % 3) * 15;
-          const top = 10 + (i * 6.5) + '%';
-          const left = (i % 2 === 0 ? 15 + (i % 4) * 8 : 50 - (i % 3) * 8) + '%';
-          
+          const size = 90 + (i % 4) * 18;
+          const row = Math.floor(i / 2);
+          const col = i % 2;
+          const top = 5 + row * 14 + (col === 0 ? 0 : 7) + "%";
+          const left = col === 0
+            ? 8 + (row % 3) * 5 + "%"
+            : 48 + (row % 3) * 5 + "%";
+
           return (
-             <div 
-              key={track.id} 
-              className={styles.trackBubble} 
-              style={{ 
-                width: size, 
-                height: size, 
-                top, 
-                left, 
+            <div
+              key={track.id}
+              className={styles.trackBubble}
+              style={{
+                width: size,
+                height: size,
+                top,
+                left,
                 backgroundImage: `url(${track.cover})`,
-                animationDelay: `${i * 0.15}s`
+                animationDelay: `${i * 0.12}s`,
               }}
               onClick={() => playTrack(track, tracks)}
+              title={`${track.title} — ${track.artist}`}
             >
               <div className={styles.playOverlay}>
-                <Play size={24} weight="fill" color="white" />
+                <Play size={22} weight="fill" color="white" />
+              </div>
+              <div className={styles.trackLabel}>
+                <span>{track.title?.split("|")[0].split("(")[0].trim().slice(0, 18)}</span>
               </div>
             </div>
           );

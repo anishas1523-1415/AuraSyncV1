@@ -1,7 +1,6 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
-import AuraDial from "@/components/AuraDial";
-import MiniPlayer from "@/components/MiniPlayer";
+import AppShell from "@/components/AppShell";
 import { AudioProvider } from "@/contexts/AudioContext";
 import { ClerkProvider } from "@clerk/nextjs";
 
@@ -11,8 +10,15 @@ export const metadata = {
   title: "AuraSynq",
   description: "Immersive Social Music App",
   manifest: "/manifest.json",
+};
+
+export const viewport = {
   themeColor: "#050505",
-  viewport: "minimum-scale=1, initial-scale=1, width=device-width, shrink-to-fit=no, user-scalable=no, viewport-fit=cover",
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }) {
@@ -22,11 +28,10 @@ export default function RootLayout({ children }) {
         <body className={inter.className}>
           <AudioProvider>
             <div className="app-container">
-              <main className="main-content" style={{ paddingBottom: '0' }}>
+              <main className="main-content" style={{ paddingBottom: "0" }}>
                 {children}
               </main>
-              <MiniPlayer />
-              <AuraDial />
+              <AppShell />
             </div>
           </AudioProvider>
         </body>

@@ -53,6 +53,11 @@
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255,255,255,0.1);
   z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .trackBubble {
@@ -96,4 +101,31 @@
 @keyframes floatBubble {
   0% { transform: translateY(0px) rotate(0deg); }
   100% { transform: translateY(-15px) rotate(5deg); }
+}
+
+.trackLabel {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.header {
+}
+.header > div h1 {
+  font-size: 2rem;
+  font-weight: 800;
+}
+.header > div p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }

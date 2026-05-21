@@ -1,110 +1,309 @@
 .container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  margin: -1rem;
-  background: #000;
-  color: white;
-  overflow: hidden;
+  gap: 1.25rem;
+  padding-bottom: 150px;
 }
 
 .header {
-  padding: 3rem 1rem 1rem;
-  text-align: center;
-  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
-.header h1 { font-size: 2.5rem; font-weight: 800; }
-.header p { color: var(--text-muted); }
+.header h1 { font-size: 1.5rem; font-weight: 800; }
+.header p { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.1rem; }
 
-.blendStage {
-  flex: 1;
-  position: relative;
+.backBtn {
+  color: white;
+  background: rgba(255,255,255,0.08);
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+/* My Card */
+.meCard {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 18px;
+  padding: 1rem 1.25rem;
+}
+
+.meCard h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.4rem; }
+.meAvatar {
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+  border: 2px solid rgba(168,85,247,0.5); flex-shrink: 0;
+}
+
+.avatarPlaceholder {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; font-weight: 800; color: white; flex-shrink: 0;
+}
+
+.genrePills { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.genrePill {
+  font-size: 0.68rem; font-weight: 600; padding: 0.2rem 0.6rem;
+  border-radius: 20px; background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.7);
+}
+
+/* Divider */
+.plusDivider { display: flex; align-items: center; gap: 0.75rem; }
+.divLine { flex: 1; height: 1px; background: rgba(255,255,255,0.08); }
+.plusCircle {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 20px rgba(168,85,247,0.4);
+  flex-shrink: 0;
+}
+
+.friendPickLabel { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+
+/* Friend List */
+.friendList { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.friendCard {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(255,255,255,0.04);
+  border: 2px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.friendCard:hover { background: rgba(255,255,255,0.07); }
+.selectedFriend { border-color: #a855f7 !important; background: rgba(168,85,247,0.1) !important; }
+
+.friendAvatar {
+  width: 48px; height: 48px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+}
+
+.friendInfo { flex: 1; }
+.friendInfo h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.35rem; }
+
+.checkMark {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #a855f7; color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; font-weight: 800; flex-shrink: 0;
+}
+
+/* Blend Button */
+.blendBtn {
+  display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  border: none; color: white; font-size: 1.05rem; font-weight: 800;
+  padding: 1rem; border-radius: 20px; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(168,85,247,0.4);
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+  letter-spacing: 0.3px;
+}
+
+.blendBtn:hover:not(:disabled) { transform: scale(1.02); box-shadow: 0 12px 32px rgba(168,85,247,0.5); }
+.blendBtn:active:not(:disabled) { transform: scale(0.97); }
+.blendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Blending Screen */
+.blendingScreen {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2rem; background: #090d18;
+}
+
+.blobStage {
+  display: flex; align-items: center; justify-content: center;
+  gap: -20px; position: relative; width: 280px; height: 140px;
 }
 
 .blob {
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  position: absolute;
-  transition: all 4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  width: 100px; height: 100px; border-radius: 50%;
+  overflow: hidden; position: absolute;
+  animation: blobPulse 1.5s ease-in-out infinite alternate;
+  box-shadow: 0 0 40px rgba(168,85,247,0.5);
+}
+
+.myBlob { left: 20px; border: 3px solid #a855f7; }
+.friendBlob { right: 20px; border: 3px solid #ec4899; animation-delay: 0.4s; }
+.blobImg { width: 100%; height: 100%; object-fit: cover; }
+.blobLetter {
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.5rem; font-weight: 800;
+}
+
+.blendOrb {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 50px; height: 50px; border-radius: 50%;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  box-shadow: 0 0 60px rgba(168,85,247,0.8);
+  animation: orbGlow 1s ease-in-out infinite alternate;
+  z-index: 5;
+}
+
+@keyframes blobPulse {
+  from { transform: scale(1) translateX(0); }
+  to { transform: scale(1.05) translateX(8px); }
+}
+
+@keyframes orbGlow {
+  from { box-shadow: 0 0 40px rgba(168,85,247,0.6); transform: translate(-50%,-50%) scale(1); }
+  to { box-shadow: 0 0 80px rgba(168,85,247,1); transform: translate(-50%,-50%) scale(1.15); }
+}
+
+.blendingText {
+  font-size: 1.1rem; font-weight: 600; color: rgba(255,255,255,0.7);
+}
+
+.blendDots {
+  display: flex; gap: 0.5rem;
+}
+
+.blendDots span {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #a855f7;
+  animation: dotBounce 0.8s ease-in-out infinite;
+}
+
+.blendDots span:nth-child(2) { animation-delay: 0.15s; background: #c084fc; }
+.blendDots span:nth-child(3) { animation-delay: 0.3s; background: #ec4899; }
+
+@keyframes dotBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Score Card */
+.scoreCard {
+  background: linear-gradient(135deg, rgba(168,85,247,0.12), rgba(236,72,153,0.08));
+  border: 1px solid rgba(168,85,247,0.25);
+  border-radius: 24px;
+  padding: 1.5rem;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 50px currentColor;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
-.myBlob {
-  color: #ff007f;
-  background: #ff007f;
-  left: 10%;
+.scoreAvatars {
+  display: flex; align-items: center; justify-content: space-between;
 }
 
-.friendBlob {
-  color: #00f0ff;
-  background: #00f0ff;
-  right: 10%;
+.scoreAvatar {
+  width: 60px; height: 60px; border-radius: 50%; object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.2);
 }
 
-.blobAvatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  z-index: 2;
-  border: 4px solid rgba(0,0,0,0.5);
+.avatarPlaceholderSm {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; font-weight: 800;
 }
 
-.blobMerge {
-  left: 50%;
-  right: auto;
-  transform: translateX(-50%) scale(1.5);
-  background: linear-gradient(135deg, #ff007f, #00f0ff);
-  color: #a450e4;
+.scoreCircle {
+  display: flex; align-items: baseline; gap: 2px;
 }
 
-.controls {
-  padding: 2rem;
-  text-align: center;
-  z-index: 10;
-  min-height: 150px;
+.scoreNum {
+  font-size: 3.5rem; font-weight: 900; line-height: 1;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 
-.blendBtn {
-  background: white;
-  color: black;
-  border: none;
-  padding: 1rem 2rem;
-  font-size: 1.2rem;
-  font-weight: 700;
-  border-radius: 30px;
-  cursor: pointer;
-  box-shadow: 0 0 20px rgba(255,255,255,0.5);
+.scorePct { font-size: 1.2rem; font-weight: 700; color: #c084fc; }
+
+.scoreTitle { font-size: 1.1rem; font-weight: 700; text-align: center; }
+
+.compatBars { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.barRow { display: flex; align-items: center; gap: 0.75rem; }
+.barLabel { font-size: 0.75rem; color: var(--text-muted); width: 90px; flex-shrink: 0; }
+.barTrack { flex: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+.barFill { height: 100%; border-radius: 3px; transition: width 1s ease; }
+.barValue { font-size: 0.75rem; font-weight: 700; width: 36px; text-align: right; }
+
+/* Playlist */
+.playlistHeader {
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.playlistHeader h2 {
+  font-size: 1rem; font-weight: 700;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+
+.trackCount {
+  font-size: 0.75rem; font-weight: 500; color: var(--text-muted);
+  background: rgba(255,255,255,0.08); padding: 2px 8px; border-radius: 10px;
+}
+
+.playlistControls { display: flex; gap: 0.5rem; }
+
+.controlBtn {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  border: none; color: white; font-size: 0.85rem; font-weight: 700;
+  padding: 0.55rem 1.1rem; border-radius: 20px; cursor: pointer;
   transition: transform 0.2s;
 }
 
-.blendBtn:active { transform: scale(0.95); }
+.controlBtn:active { transform: scale(0.95); }
 
-.status {
-  font-size: 1.2rem;
-  animation: pulse 1s infinite alternate;
+/* Blend Track List */
+.blendTrackList { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.blendTrack {
+  display: flex; align-items: center; gap: 0.9rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 14px; cursor: pointer;
+  transition: background 0.2s;
+  border: 1px solid transparent;
 }
 
-.result {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+.blendTrack:hover { background: rgba(255,255,255,0.06); }
+.activeBlendTrack { background: rgba(168,85,247,0.1) !important; border-color: rgba(168,85,247,0.2); }
+
+.ownerTag {
+  font-size: 0.6rem; font-weight: 700;
+  padding: 0.2rem 0.5rem; border-radius: 8px;
+  white-space: nowrap; flex-shrink: 0;
+  letter-spacing: 0.3px;
 }
 
-@keyframes pulse {
-  0% { opacity: 0.5; }
-  100% { opacity: 1; }
+.blendCover {
+  width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex-shrink: 0;
 }
 
-@keyframes popIn {
-  0% { transform: scale(0.8); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
+.blendInfo { flex: 1; min-width: 0; }
+.blendInfo h4 {
+  font-size: 0.88rem; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 0.15rem; transition: color 0.2s;
 }
+.blendInfo p { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.blendPlayIcon {
+  color: rgba(255,255,255,0.3); flex-shrink: 0;
+  opacity: 0; transition: opacity 0.2s; display: flex; align-items: center;
+}
+
+.blendTrack:hover .blendPlayIcon,
+.activeBlendTrack .blendPlayIcon { opacity: 1; }

@@ -2,95 +2,129 @@
 import styles from "./page.module.css";
 import { useEffect, useMemo, useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, ArrowLeft } from "@phosphor-icons/react/dist/ssr";
+import { Play, ArrowLeft, Pause, MusicNote } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 
-const CATEGORY_QUERIES = {
-  chill: "lofi chill songs",
-  focus: "focus music instrumental",
-  workout: "workout songs",
-  sleep: "sleep music relaxation"
-};
-
-const CATEGORY_TITLES = {
-  chill: "Chill Picks",
-  focus: "Focus Picks",
-  workout: "Workout Picks",
-  sleep: "Sleep Picks"
+const CATEGORY_MAP = {
+  chill:      { title: "Chill Vibes",        query: "lofi chill relaxing music",        color: "#11998e", emoji: "🌊" },
+  focus:      { title: "Focus Mode",          query: "focus study instrumental music",    color: "#4776E6", emoji: "🎯" },
+  workout:    { title: "Workout Beast",        query: "workout gym motivation songs",      color: "#FF4500", emoji: "💪" },
+  sleep:      { title: "Sleep Sounds",         query: "sleep music calming relaxation",    color: "#483D8B", emoji: "🌙" },
+  pop:        { title: "Pop Hits",             query: "top pop songs 2024",               color: "#FF416C", emoji: "⭐" },
+  hiphop:     { title: "Hip-Hop",             query: "hip hop rap songs",                color: "#8E54E9", emoji: "🎤" },
+  indie:      { title: "Indie Picks",          query: "indie alternative music",          color: "#FF8008", emoji: "🎸" },
+  electronic: { title: "Electronic",          query: "electronic edm music",             color: "#b224ef", emoji: "⚡" },
+  rock:       { title: "Rock Anthems",         query: "rock songs classic",               color: "#E94057", emoji: "🎸" },
+  tamil:      { title: "Tamil Hits",           query: "latest tamil hit songs",           color: "#f7971e", emoji: "🎵" },
 };
 
 export default function CategoryPage({ params }) {
   const { slug } = params;
-  const { playTrack } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeIndex, setActiveIndex] = useState(null);
 
-  const title = CATEGORY_TITLES[slug] || `${slug?.charAt(0).toUpperCase()}${slug?.slice(1)} Picks`;
-  const query = useMemo(() => CATEGORY_QUERIES[slug] || `${slug} songs`, [slug]);
+  const category = CATEGORY_MAP[slug] || {
+    title: `${slug?.charAt(0).toUpperCase()}${slug?.slice(1)} Picks`,
+    query: `${slug} songs`,
+    color: "#8A2BE2",
+    emoji: "🎵",
+  };
 
   useEffect(() => {
-    async function fetchCategorySongs() {
+    async function fetchSongs() {
+      setLoading(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(category.query)}`);
         const data = await res.json();
-
-        if (data.tracks?.length) {
-          setTracks(data.tracks.slice(0, 15));
-        } else {
-          setTracks([]);
-        }
-      } catch (error) {
-        console.error(error);
+        if (data.tracks?.length) setTracks(data.tracks.slice(0, 20));
+      } catch (e) {
+        console.error(e);
       } finally {
         setLoading(false);
       }
     }
+    fetchSongs();
+  }, [slug]);
 
-    fetchCategorySongs();
-  }, [query]);
+  const handlePlay = (track, index) => {
+    if (currentTrack?.id === track.id) {
+      togglePlay();
+    } else {
+      setActiveIndex(index);
+      playTrack(track, tracks);
+    }
+  };
 
   return (
     <div className={styles.container}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.backBtn}>
-          <ArrowLeft size={24} />
-        </Link>
-        <h1>{title}</h1>
-        <p>{query}</p>
-      </header>
-
-      <div className={styles.spatialMap}>
-        {loading && (
-          <div className={styles.loader}>
-            Loading {title}...
-          </div>
+      {/* Hero Header */}
+      <div className={styles.hero} style={{ "--cat-color": category.color }}>
+        <div className={styles.heroBg} style={{ background: `linear-gradient(135deg, ${category.color}33, transparent)` }} />
+        <Link href="/" className={styles.backBtn}><ArrowLeft size={22} /></Link>
+        <div className={styles.heroContent}>
+          <span className={styles.emoji}>{category.emoji}</span>
+          <h1>{category.title}</h1>
+          <p className={styles.trackCount}>
+            {loading ? "Loading..." : `${tracks.length} songs`}
+          </p>
+        </div>
+        {!loading && tracks.length > 0 && (
+          <button
+            className={styles.playAllBtn}
+            style={{ background: category.color }}
+            onClick={() => playTrack(tracks[0], tracks)}
+          >
+            <Play size={20} weight="fill" /> Play All
+          </button>
         )}
+      </div>
 
-        {tracks.map((track, i) => {
-          const size = 95 + (i % 3) * 15;
-          const top = 10 + (i * 6.5) + '%';
-          const left = (i % 2 === 0 ? 15 + (i % 4) * 8 : 50 - (i % 3) * 8) + '%';
-
-          return (
-            <div
-              key={track.id}
-              className={styles.trackBubble}
-              style={{
-                width: size,
-                height: size,
-                top,
-                left,
-                backgroundImage: `url(${track.cover})`,
-                animationDelay: `${i * 0.15}s`
-              }}
-              onClick={() => playTrack(track, tracks)}
-            >
-              <div className={styles.playOverlay}>
-                <Play size={24} weight="fill" color="white" />
+      {/* Track List */}
+      <div className={styles.trackList}>
+        {loading ? (
+          Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className={styles.skeletonItem}>
+              <div className={styles.skeletonCover} />
+              <div className={styles.skeletonInfo}>
+                <div className={styles.skeletonTitle} />
+                <div className={styles.skeletonArtist} />
               </div>
             </div>
-          );
-        })}
+          ))
+        ) : (
+          tracks.map((track, i) => {
+            const isActive = currentTrack?.id === track.id;
+            return (
+              <div
+                key={track.id}
+                className={`${styles.trackItem} ${isActive ? styles.activeTrack : ""}`}
+                onClick={() => handlePlay(track, i)}
+              >
+                <span className={styles.trackNumber}>
+                  {isActive && isPlaying
+                    ? <span className={styles.playingDot} style={{ background: category.color }} />
+                    : i + 1
+                  }
+                </span>
+                <img src={track.cover} alt={track.title} className={styles.cover} />
+                <div className={styles.trackInfo}>
+                  <h3 style={isActive ? { color: category.color } : {}}>
+                    {track.title?.split("|")[0].split("(")[0].trim()}
+                  </h3>
+                  <p>{track.artist}</p>
+                </div>
+                <div className={styles.playBtn}>
+                  {isActive && isPlaying
+                    ? <Pause size={18} weight="fill" style={{ color: category.color }} />
+                    : <Play size={18} weight="fill" />
+                  }
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

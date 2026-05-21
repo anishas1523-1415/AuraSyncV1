@@ -198,6 +198,7 @@ export function AudioProvider({ children }) {
   const [silenceSrc, setSilenceSrc] = useState("");
   const [mounted, setMounted] = useState(false);
   const [isYtReady, setIsYtReady] = useState(false);
+  const [playHistory, setPlayHistory] = useState([]);
 
   const audioRef = useRef(null);
   const ytPlayerRef = useRef(null);
@@ -418,6 +419,39 @@ export function AudioProvider({ children }) {
     }
   };
 
+  const stopAudio = () => {
+    try {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
+        ytPlayerRef.current.pauseVideo();
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+    } catch (err) {}
+    setCurrentTrack(null);
+    setIsPlaying(false);
+    setIsBuffering(false);
+    setProgress(0);
+    setDuration(0);
+    setQueue([]);
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  const addToHistory = (track) => {
+    setPlayHistory(prev => {
+      const filtered = prev.filter(t => t.id !== track.id);
+      const updated = [track, ...filtered].slice(0, 20);
+      try {
+        localStorage.setItem('aurasynq_play_history', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
   const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
     // Set queue if provided, or build one
     if (newQueue) {
@@ -440,7 +474,7 @@ export function AudioProvider({ children }) {
       setIsBuffering(shouldAutoPlay);
       setProgress(0);
       setDuration(0);
-      
+      addToHistory(track);
       fetchLyricsFromApi(track.title, track.artist, track.id);
 
       // Decide whether this is a direct audio URL (mp3) or a YouTube video.
@@ -689,8 +723,16 @@ export function AudioProvider({ children }) {
     }
   }, [progress, duration, currentTrack?.id]);
 
+  // Load history from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('aurasynq_play_history');
+      if (stored) setPlayHistory(JSON.parse(stored));
+    } catch (e) {}
+  }, []);
+
   return (
-    <AudioContext.Provider value={{ currentTrack, isPlaying, isBuffering, playTrack, togglePlay, progress, duration, seekTo, playNext, playPrevious }}>
+    <AudioContext.Provider value={{ currentTrack, isPlaying, isBuffering, playTrack, togglePlay, progress, duration, seekTo, playNext, playPrevious, stopAudio, playHistory }}>
       {children}
       {mounted && currentTrack && silenceSrc && (
         <audio 

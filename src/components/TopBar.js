@@ -1,6 +1,7 @@
 "use client";
 import styles from './TopBar.module.css';
 import { UserButton, useUser } from '@clerk/nextjs';
+import { dark } from '@clerk/themes';
 import { Bell, Users, Waves } from '@phosphor-icons/react';
 import Link from 'next/link';
 
@@ -9,26 +10,30 @@ export default function TopBar() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
 
-  // Fallback values if Clerk is loading or no user is signed in
-  const displayName = isLoaded && user ? user.firstName || user.fullName : "Guest";
+  const displayName = isLoaded && user ? user.firstName || user.fullName || "Guest" : "Guest";
 
   return (
     <header className={styles.topBar}>
-      <div className={styles.userInfo}>
-        {/* Render Clerk's interactive UserButton */}
+      <Link href="/profile" className={styles.userInfo}>
         <UserButton 
-          afterSignOutUrl="/" 
+          afterSignOutUrl="/"
           appearance={{
+            baseTheme: dark,
             elements: {
-              avatarBox: styles.avatar
+              avatarBox: {
+                width: "42px",
+                height: "42px",
+                borderRadius: "50%",
+                border: "2px solid rgba(255,255,255,0.12)"
+              }
             }
           }}
         />
-        <div style={{ marginLeft: '8px' }}>
+        <div>
           <p className={styles.greeting}>{greeting},</p>
           <h1 className={styles.name}>{displayName}</h1>
         </div>
-      </div>
+      </Link>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <Link href="/society" className={styles.iconBtn}>
           <Users size={24} />
