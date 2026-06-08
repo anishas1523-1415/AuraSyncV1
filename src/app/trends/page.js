@@ -2,13 +2,15 @@
 import styles from "./page.module.css";
 import { useEffect, useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, ArrowLeft, MusicNotes } from "@phosphor-icons/react";
+import { Play, ArrowLeft, MusicNotes, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
+import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 
 export default function Trends() {
-  const { playTrack } = useAudio();
+  const { playTrack, setContextPlaylist } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeModalTrack, setActiveModalTrack] = useState(null);
 
   useEffect(() => {
     async function fetchTamilSongs() {
@@ -16,7 +18,8 @@ export default function Trends() {
         const res = await fetch("/api/search?q=latest+tamil+hit+songs");
         const data = await res.json();
         if (data.tracks) {
-          setTracks(data.tracks.slice(0, 15));
+          const list = data.tracks.slice(0, 15);
+          setTracks(list);
         }
       } catch (e) {
         console.error(e);
@@ -26,6 +29,21 @@ export default function Trends() {
     }
     fetchTamilSongs();
   }, []);
+
+  // Expose trends tracks as global context playlist for floating dial
+  useEffect(() => {
+    if (tracks.length > 0) {
+      setContextPlaylist({
+        type: "trends",
+        id: "trends",
+        title: "Tamil Trends",
+        tracks: tracks
+      });
+    }
+    return () => {
+      setContextPlaylist(null);
+    };
+  }, [tracks]);
 
   return (
     <div className={styles.container}>
@@ -71,16 +89,24 @@ export default function Trends() {
               onClick={() => playTrack(track, tracks)}
               title={`${track.title} — ${track.artist}`}
             >
+
               <div className={styles.playOverlay}>
                 <Play size={22} weight="fill" color="white" />
               </div>
               <div className={styles.trackLabel}>
-                <span>{track.title?.split("|")[0].split("(")[0].trim().slice(0, 18)}</span>
+                <span>{track.title?.split("|")[0].split("(")[0].trim().slice(0, 14)}</span>
               </div>
             </div>
           );
         })}
       </div>
+
+      {activeModalTrack && (
+        <AddToPlaylistModal 
+          track={activeModalTrack} 
+          onClose={() => setActiveModalTrack(null)} 
+        />
+      )}
     </div>
   );
 }

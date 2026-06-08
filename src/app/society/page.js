@@ -2,7 +2,7 @@
 import styles from "./page.module.css";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { useUser } from "@clerk/nextjs";
+import { useUser } from "@/lib/clerk";
 import { Users, Microphone, MusicNote, Heartbeat, Chat, ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
 
@@ -32,8 +32,16 @@ export default function Society() {
   ]);
   const [reactionBurst, setReactionBurst] = useState([]);
   const chatRef = useRef(null);
+  const currentTrackRef = useRef(currentTrack);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
   const handleCanvasTap = (e) => {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(10);
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -45,6 +53,9 @@ export default function Society() {
   };
 
   const sendReaction = (reaction) => {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(15);
+    }
     const burst = { id: Date.now(), emoji: reaction.emoji };
     setReactionBurst(prev => [...prev, burst]);
     setTimeout(() => {
@@ -64,6 +75,83 @@ export default function Society() {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Request notifications permission on mount and setup mock friends activity
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
+
+    const interval = setInterval(() => {
+      const isReaction = Math.random() > 0.4;
+      const onlineFriends = MOCK_FRIENDS.filter(f => f.online);
+      if (onlineFriends.length === 0) return;
+      const randomFriend = onlineFriends[Math.floor(Math.random() * onlineFriends.length)];
+
+      if (isReaction) {
+        const randomReaction = REACTIONS[Math.floor(Math.random() * REACTIONS.length)];
+        const burst = { id: Date.now(), emoji: randomReaction.emoji };
+        setReactionBurst(prev => [...prev, burst]);
+        setTimeout(() => {
+          setReactionBurst(prev => prev.filter(b => b.id !== burst.id));
+        }, 1500);
+
+        setMessages(prev => [
+          ...prev,
+          { id: Date.now(), user: randomFriend.name, text: `${randomReaction.emoji} reacted`, time: "just now" }
+        ].slice(-10));
+
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate(8);
+        }
+
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("AuraSynq Live", {
+            body: `${randomFriend.name} reacted with ${randomReaction.emoji}`,
+            icon: "/icon-192x192.png",
+            silent: true
+          });
+        }
+      } else {
+        const activeTrack = currentTrackRef.current;
+        const cleanTitle = activeTrack ? activeTrack.title.split("|")[0].split("(")[0].trim().slice(0, 24) : "";
+        const cleanArtist = activeTrack ? activeTrack.artist : "";
+
+        const dynamicComments = activeTrack ? [
+          `listening to "${cleanTitle}" too! 🔥`,
+          `"${cleanTitle}" is an absolute masterpiece! 🚀`,
+          `that beat transition in "${cleanTitle}" was insane`,
+          `${cleanArtist} is literally a legend`,
+          "anyone wants to sync a blend for this track?",
+          "AuraSynq UI is so clean, love this player vibe"
+        ] : [
+          "this song is a masterpiece! 🔥",
+          "vibing hard right now 🚀",
+          "that last beat transition was insane",
+          "cyberpunk UI is so clean",
+          "anyone wants to share a blend?",
+          "AuraSynq is amazing"
+        ];
+        
+        const comment = dynamicComments[Math.floor(Math.random() * dynamicComments.length)];
+        setMessages(prev => [
+          ...prev,
+          { id: Date.now(), user: randomFriend.name, text: comment, time: "just now" }
+        ].slice(-10));
+
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("AuraSynq Chat", {
+            body: `${randomFriend.name}: ${comment}`,
+            icon: "/icon-192x192.png"
+          });
+        }
+      }
+    }, 15000); // Simulates friend activity every 15 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className={styles.container}>

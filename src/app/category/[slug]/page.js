@@ -1,9 +1,36 @@
 "use client";
 import styles from "./page.module.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, ArrowLeft, Pause, MusicNote } from "@phosphor-icons/react";
+import { Play, ArrowLeft, Pause, MusicNote, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
+import AddToPlaylistModal from "@/components/AddToPlaylistModal";
+
+const getFavoriteArtist = () => {
+  try {
+    const stored = localStorage.getItem("aurasynq_play_history");
+    if (!stored) return null;
+    const history = JSON.parse(stored);
+    if (!history || history.length === 0) return null;
+    
+    const counts = {};
+    let maxArtist = null;
+    let maxCount = 0;
+    
+    for (const track of history) {
+      if (!track.artist) continue;
+      const artist = track.artist.trim();
+      counts[artist] = (counts[artist] || 0) + 1;
+      if (counts[artist] > maxCount) {
+        maxCount = counts[artist];
+        maxArtist = artist;
+      }
+    }
+    return maxArtist;
+  } catch (e) {
+    return null;
+  }
+};
 
 const CATEGORY_MAP = {
   chill:      { title: "Chill Vibes",        query: "lofi chill relaxing music",        color: "#11998e", emoji: "🌊" },
@@ -16,14 +43,16 @@ const CATEGORY_MAP = {
   electronic: { title: "Electronic",          query: "electronic edm music",             color: "#b224ef", emoji: "⚡" },
   rock:       { title: "Rock Anthems",         query: "rock songs classic",               color: "#E94057", emoji: "🎸" },
   tamil:      { title: "Tamil Hits",           query: "latest tamil hit songs",           color: "#f7971e", emoji: "🎵" },
+  foryou:     { title: "For You",              query: "popular hits chart music",         color: "#ec4899", emoji: "✨" },
 };
 
 export default function CategoryPage({ params }) {
-  const { slug } = params;
-  const { playTrack, currentTrack, isPlaying, togglePlay } = useAudio();
+  const { slug } = use(params);
+  const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(null);
+  const [activeModalTrack, setActiveModalTrack] = useState(null);
 
   const category = CATEGORY_MAP[slug] || {
     title: `${slug?.charAt(0).toUpperCase()}${slug?.slice(1)} Picks`,
@@ -36,7 +65,19 @@ export default function CategoryPage({ params }) {
     async function fetchSongs() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(category.query)}`);
+        let searchQuery = category.query;
+        const favArtist = getFavoriteArtist();
+
+        if (slug === "foryou") {
+          if (favArtist) {
+            searchQuery = `${favArtist} hit songs`;
+          }
+        } else if (favArtist && slug !== "sleep" && slug !== "focus") {
+          // Personalize category searches with the user's favorite artist
+          searchQuery = `${searchQuery} ${favArtist}`;
+        }
+
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
         const data = await res.json();
         if (data.tracks?.length) setTracks(data.tracks.slice(0, 20));
       } catch (e) {
@@ -47,6 +88,21 @@ export default function CategoryPage({ params }) {
     }
     fetchSongs();
   }, [slug]);
+
+  // Expose category tracks as global context playlist for floating dial
+  useEffect(() => {
+    if (tracks.length > 0) {
+      setContextPlaylist({
+        type: "category",
+        id: slug,
+        title: category.title,
+        tracks: tracks
+      });
+    }
+    return () => {
+      setContextPlaylist(null);
+    };
+  }, [tracks, slug]);
 
   const handlePlay = (track, index) => {
     if (currentTrack?.id === track.id) {
@@ -71,13 +127,15 @@ export default function CategoryPage({ params }) {
           </p>
         </div>
         {!loading && tracks.length > 0 && (
-          <button
-            className={styles.playAllBtn}
-            style={{ background: category.color }}
-            onClick={() => playTrack(tracks[0], tracks)}
-          >
-            <Play size={20} weight="fill" /> Play All
-          </button>
+          <div className={styles.actionRow}>
+            <button
+              className={styles.playAllBtn}
+              style={{ background: category.color }}
+              onClick={() => playTrack(tracks[0], tracks)}
+            >
+              <Play size={20} weight="fill" /> Play All
+            </button>
+          </div>
         )}
       </div>
 
@@ -115,17 +173,37 @@ export default function CategoryPage({ params }) {
                   </h3>
                   <p>{track.artist}</p>
                 </div>
-                <div className={styles.playBtn}>
-                  {isActive && isPlaying
-                    ? <Pause size={18} weight="fill" style={{ color: category.color }} />
-                    : <Play size={18} weight="fill" />
-                  }
+                
+                <div className={styles.trackActions}>
+                  <button
+                    className={styles.addBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveModalTrack(track);
+                    }}
+                    title="Add to Playlist"
+                  >
+                    <Plus size={18} />
+                  </button>
+                  <div className={styles.playBtn}>
+                    {isActive && isPlaying
+                      ? <Pause size={18} weight="fill" style={{ color: category.color }} />
+                      : <Play size={18} weight="fill" />
+                    }
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {activeModalTrack && (
+        <AddToPlaylistModal 
+          track={activeModalTrack} 
+          onClose={() => setActiveModalTrack(null)} 
+        />
+      )}
     </div>
   );
 }

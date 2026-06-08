@@ -193,14 +193,98 @@ export function AudioProvider({ children }) {
   const [queue, setQueue] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgressState] = useState(0);
+  const progressRef = useRef(0);
+  const setProgress = (val) => {
+    progressRef.current = val;
+    setProgressState(val);
+  };
+  
   const [duration, setDuration] = useState(0);
   const [silenceSrc, setSilenceSrc] = useState("");
   const [mounted, setMounted] = useState(false);
   const [isYtReady, setIsYtReady] = useState(false);
-  const [playHistory, setPlayHistory] = useState([]);
+  const [playHistory, setPlayHistory] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem('aurasynq_play_history');
+        if (stored) return JSON.parse(stored);
+      } catch (e) {}
+    }
+    return [];
+  });
+  
+  const [likedTracks, setLikedTracks] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem('aurasynq_liked_songs_metadata');
+        if (stored) return JSON.parse(stored);
+      } catch (e) {}
+    }
+    return [];
+  });
+  
+  const [customPlaylists, setCustomPlaylists] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem('aurasynq_custom_playlists');
+        if (stored) return JSON.parse(stored);
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [originalQueue, setOriginalQueue] = useState([]);
+  const [contextPlaylist, setContextPlaylist] = useState(null);
+  const [sharedTrackInfo, setSharedTrackInfo] = useState(null);
 
   const audioRef = useRef(null);
+  const silenceAudioRef = useRef(null);
+
+  const removeFromQueue = (trackId) => {
+    setQueue(prev => prev.filter(t => t.id !== trackId));
+    setOriginalQueue(prev => prev.filter(t => t.id !== trackId));
+  };
+
+  const addToQueue = (track) => {
+    setQueue(prev => {
+      const exists = prev.some(t => t.id === track.id);
+      if (!exists) return [...prev, track];
+      return prev;
+    });
+    setOriginalQueue(prev => {
+      const exists = prev.some(t => t.id === track.id);
+      if (!exists) return [...prev, track];
+      return prev;
+    });
+  };
+
+  const toggleShuffle = () => {
+    setIsShuffle(prev => {
+      const nextShuffle = !prev;
+      if (nextShuffle) {
+        setOriginalQueue([...queue]);
+        const currentT = currentTrackRef.current;
+        let otherTracks = queue.filter(t => t.id !== currentT?.id);
+        
+        for (let i = otherTracks.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [otherTracks[i], otherTracks[j]] = [otherTracks[j], otherTracks[i]];
+        }
+        
+        if (currentT) {
+          setQueue([currentT, ...otherTracks]);
+        } else {
+          setQueue(otherTracks);
+        }
+      } else {
+        if (originalQueue.length > 0) {
+          setQueue(originalQueue);
+        }
+      }
+      return nextShuffle;
+    });
+  };
   const ytPlayerRef = useRef(null);
   const pollIntervalRef = useRef(null);
   const currentIsHtmlRef = useRef(false);
@@ -270,25 +354,37 @@ export function AudioProvider({ children }) {
     };
   }, []);
 
-  const playNext = () => {
+  const playNext = (shouldAutoPlay = isPlayingRef.current) => {
     const currentQ = queueRef.current;
     const currentT = currentTrackRef.current;
-    if (currentQ.length <= 1 || !currentT) return;
+    if (currentQ.length <= 1 || !currentT) {
+      if (currentT) {
+        seekTo(0);
+      }
+      return;
+    }
     const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
     if (currentIndex !== -1) {
       const nextIndex = (currentIndex + 1) % currentQ.length;
-      playTrack(currentQ[nextIndex], currentQ, isPlayingRef.current);
+      playTrack(currentQ[nextIndex], currentQ, shouldAutoPlay);
     }
   };
 
-  const playPrevious = () => {
+  const playPrevious = (shouldAutoPlay = isPlayingRef.current) => {
     const currentQ = queueRef.current;
     const currentT = currentTrackRef.current;
-    if (currentQ.length <= 1 || !currentT) return;
+    if (!currentT) return;
+
+    // If progress is > 3 seconds, or it's the only track, restart the track
+    if (progressRef.current > 3 || currentQ.length <= 1) {
+      seekTo(0);
+      return;
+    }
+
     const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
     if (currentIndex !== -1) {
       const prevIndex = (currentIndex - 1 + currentQ.length) % currentQ.length;
-      playTrack(currentQ[prevIndex], currentQ, isPlayingRef.current);
+      playTrack(currentQ[prevIndex], currentQ, shouldAutoPlay);
     }
   };
 
@@ -337,10 +433,6 @@ export function AudioProvider({ children }) {
               console.warn('AuraSynq Debug: YT Player error', event.data);
               setIsBuffering(false);
               setIsPlaying(false);
-              // If a video is unplayable (private/region blocked), skip to next after short delay
-              setTimeout(() => {
-                playNext();
-              }, 300);
             } catch (err) {
               // ignore
             }
@@ -453,6 +545,11 @@ export function AudioProvider({ children }) {
   };
 
   const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
+    // Synchronously kickstart background audio hack on user gesture to guarantee WebView background playback
+    if (shouldAutoPlay && silenceAudioRef.current) {
+      silenceAudioRef.current.play().catch(() => {});
+    }
+
     // Set queue if provided, or build one
     if (newQueue) {
       setQueue(newQueue);
@@ -492,10 +589,41 @@ export function AudioProvider({ children }) {
         }
 
         // Use HTMLAudioElement for direct audio
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
             if (audioRef.current) {
-              audioRef.current.src = track.url;
+              let audioSrc = track.url;
+              
+              // Check Cache Storage for offline playback
+              try {
+                if (typeof window !== "undefined" && "caches" in window) {
+                  const cache = await caches.open("aurasynq_offline_audio");
+                  const matchedResponse = await cache.match(track.url);
+                  if (matchedResponse) {
+                    const blob = await matchedResponse.blob();
+                    audioSrc = URL.createObjectURL(blob);
+                    console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
+                  } else {
+                    if (navigator.onLine) {
+                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
+                      fetch(track.url).then(async (response) => {
+                        if (response.ok) {
+                          const cacheCopy = await caches.open("aurasynq_offline_audio");
+                          await cacheCopy.put(track.url, response);
+                          if (track.cover) {
+                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
+                          }
+                        }
+                      }).catch(e => console.warn("Background caching failed", e));
+                    }
+                  }
+                }
+              } catch (cacheErr) {
+                console.warn("Offline caching matching failed:", cacheErr);
+              }
+
+              audioRef.current.src = audioSrc;
               audioRef.current.currentTime = 0;
               if (shouldAutoPlay) {
                 audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
@@ -548,12 +676,37 @@ export function AudioProvider({ children }) {
         loadVideo();
       }
     } else {
+      seekTo(0);
       setIsPlaying(shouldAutoPlay);
+      if (currentIsHtmlRef.current && audioRef.current) {
+        audioRef.current.currentTime = 0;
+        if (shouldAutoPlay) {
+          audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+        }
+      } else if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+        ytPlayerRef.current.seekTo(0, true);
+        if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
+          try {
+            ytPlayerRef.current.playVideo();
+          } catch (err) {
+            console.warn("YT replay failed:", err);
+          }
+        }
+      }
     }
   };
 
   const togglePlay = () => {
     if (currentTrack) {
+      // Synchronously toggle silence audio to maintain background media session lock
+      if (silenceAudioRef.current) {
+        if (!isPlaying) {
+          silenceAudioRef.current.play().catch(() => {});
+        } else {
+          silenceAudioRef.current.pause();
+        }
+      }
+
       // If current track is direct HTML audio, control audio element directly
       if (currentIsHtmlRef.current && audioRef.current) {
         if (isPlaying) {
@@ -600,21 +753,19 @@ export function AudioProvider({ children }) {
         if (audioRef.current) {
           if (isPlaying) {
             audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+            if (silenceAudioRef.current) silenceAudioRef.current.play().catch(() => {});
           } else {
             audioRef.current.pause();
+            if (silenceAudioRef.current) silenceAudioRef.current.pause();
           }
         }
       } else if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
         if (isPlaying) {
           ytPlayerRef.current.playVideo();
-          if (audioRef.current) {
-            audioRef.current.play().catch(err => console.warn("Silent audio play failed:", err));
-          }
+          if (silenceAudioRef.current) silenceAudioRef.current.play().catch(() => {});
         } else {
           ytPlayerRef.current.pauseVideo();
-          if (audioRef.current) {
-            audioRef.current.pause();
-          }
+          if (silenceAudioRef.current) silenceAudioRef.current.pause();
         }
       }
     } catch (err) {
@@ -695,8 +846,8 @@ export function AudioProvider({ children }) {
 
       navigator.mediaSession.setActionHandler("play", () => setIsPlaying(true));
       navigator.mediaSession.setActionHandler("pause", () => setIsPlaying(false));
-      navigator.mediaSession.setActionHandler("nexttrack", () => playNext());
-      navigator.mediaSession.setActionHandler("previoustrack", () => playPrevious());
+      navigator.mediaSession.setActionHandler("nexttrack", () => playNext(true));
+      navigator.mediaSession.setActionHandler("previoustrack", () => playPrevious(true));
       navigator.mediaSession.setActionHandler("seekto", (details) => {
         if (details.seekTime !== undefined) seekTo(details.seekTime);
       });
@@ -723,22 +874,284 @@ export function AudioProvider({ children }) {
     }
   }, [progress, duration, currentTrack?.id]);
 
-  // Load history from localStorage on mount
-  useEffect(() => {
+  // History, liked songs, and custom playlists are now initialized lazily in useState.
+
+  // Liking implementation
+  const toggleLikeTrack = (track) => {
+    if (!track) return;
+    setLikedTracks(prev => {
+      const isLiked = prev.some(t => t.id === track.id);
+      let updated;
+      if (isLiked) {
+        updated = prev.filter(t => t.id !== track.id);
+      } else {
+        updated = [...prev, track];
+      }
+      try {
+        localStorage.setItem('aurasynq_liked_songs_metadata', JSON.stringify(updated));
+        const dict = {};
+        updated.forEach(t => { dict[t.id] = true; });
+        localStorage.setItem('aurasynq_liked', JSON.stringify(dict));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  const isTrackLiked = (trackId) => {
+    return likedTracks.some(t => t.id === trackId);
+  };
+
+  // Custom playlists implementation
+  const createPlaylist = (name) => {
+    const newPlaylist = {
+      id: 'playlist_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      name: name || 'Unnamed Playlist',
+      tracks: [],
+      isCollaborative: false,
+      collaborators: []
+    };
+    setCustomPlaylists(prev => {
+      const updated = [...prev, newPlaylist];
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+    return newPlaylist;
+  };
+
+  const deletePlaylist = (playlistId) => {
+    setCustomPlaylists(prev => {
+      const updated = prev.filter(p => p.id !== playlistId);
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const renamePlaylist = (playlistId, newName) => {
+    setCustomPlaylists(prev => {
+      const updated = prev.map(p => p.id === playlistId ? { ...p, name: newName } : p);
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const addTrackToPlaylist = (playlistId, track) => {
+    if (!track) return;
+    setCustomPlaylists(prev => {
+      const updated = prev.map(p => {
+        if (p.id === playlistId) {
+          const exists = p.tracks.some(t => t.id === track.id);
+          if (!exists) {
+            return { ...p, tracks: [...p.tracks, track] };
+          }
+        }
+        return p;
+      });
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const removeTrackFromPlaylist = (playlistId, trackId) => {
+    setCustomPlaylists(prev => {
+      const updated = prev.map(p => {
+        if (p.id === playlistId) {
+          return { ...p, tracks: p.tracks.filter(t => t.id !== trackId) };
+        }
+        return p;
+      });
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const toggleCollaborative = (playlistId) => {
+    setCustomPlaylists(prev => {
+      const updated = prev.map(p => {
+        if (p.id === playlistId) {
+          const nextCollab = !p.isCollaborative;
+          const collaborators = nextCollab ? [
+            { name: "Arun", avatar: "https://i.pravatar.cc/150?u=arun_blend" },
+            { name: "Meera", avatar: "https://i.pravatar.cc/150?u=meera_blend" }
+          ] : [];
+          return { ...p, isCollaborative: nextCollab, collaborators };
+        }
+        return p;
+      });
+      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  // Offline Caching helpers
+  const downloadTrack = async (track) => {
+    if (typeof window === "undefined" || !("caches" in window) || !track) return false;
     try {
-      const stored = localStorage.getItem('aurasynq_play_history');
-      if (stored) setPlayHistory(JSON.parse(stored));
-    } catch (e) {}
-  }, []);
+      const isDirectAudio = track.url && /\.mp3($|\?)/i.test(track.url);
+      if (!isDirectAudio) return false;
+      
+      const cache = await caches.open("aurasynq_offline_audio");
+      const matched = await cache.match(track.url);
+      if (!matched) {
+        const res = await fetch(track.url);
+        if (res.ok) {
+          await cache.put(track.url, res);
+          if (track.cover) {
+            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+            if (imgRes) await cache.put(track.cover, imgRes);
+          }
+        } else {
+          return false;
+        }
+      }
+      
+      try {
+        const stored = localStorage.getItem("aurasynq_downloaded_metadata");
+        const list = stored ? JSON.parse(stored) : [];
+        if (!list.some(t => t.id === track.id)) {
+          list.push(track);
+          localStorage.setItem("aurasynq_downloaded_metadata", JSON.stringify(list));
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+      return true;
+    } catch (err) {
+      console.warn("Global download track failed", err);
+      return false;
+    }
+  };
+
+  const deleteDownloadedTrack = async (trackId) => {
+    if (typeof window === "undefined" || !("caches" in window)) return false;
+    try {
+      const stored = localStorage.getItem("aurasynq_downloaded_metadata");
+      const list = stored ? JSON.parse(stored) : [];
+      const track = list.find(t => t.id === trackId);
+      if (track) {
+        const cache = await caches.open("aurasynq_offline_audio");
+        await cache.delete(track.url);
+        if (track.cover) await cache.delete(track.cover);
+      }
+      const updated = list.filter(t => t.id !== trackId);
+      localStorage.setItem("aurasynq_downloaded_metadata", JSON.stringify(updated));
+      return true;
+    } catch (err) {
+      console.warn("Global delete downloaded track failed", err);
+      return false;
+    }
+  };
+
+  // Shared track link auto-play logic
+  useEffect(() => {
+    if (typeof window === "undefined" || !mounted) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const trackId = urlParams.get("track");
+    if (!trackId) return;
+
+    const loadSharedTrack = async () => {
+      try {
+        console.log("AuraSynq Debug: Shared track detected. Fetching track metadata for", trackId);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trackId)}`);
+        const data = await res.json();
+        if (data.tracks && data.tracks.length > 0) {
+          const matchedTrack = data.tracks[0];
+          setSharedTrackInfo(matchedTrack);
+          // Play the track automatically
+          playTrack(matchedTrack, [matchedTrack], true);
+        }
+      } catch (err) {
+        console.warn("Failed to load shared track", err);
+      }
+    };
+    loadSharedTrack();
+  }, [mounted]);
+
+  const clearSharedTrack = () => setSharedTrackInfo(null);
+
+  // User taste profile analyzer based on actual play history
+  const getUserTasteProfile = () => {
+    if (playHistory.length === 0) {
+      return { topArtist: "None", topGenre: "None", dominantMood: "None", stats: null };
+    }
+    
+    const artistCounts = {};
+    const genreCounts = {};
+    const moodCounts = {};
+    
+    playHistory.forEach(track => {
+      if (track.artist) {
+        const artistClean = track.artist.trim();
+        artistCounts[artistClean] = (artistCounts[artistClean] || 0) + 1;
+      }
+      
+      let genre = "Pop";
+      const titleLower = (track.title || "").toLowerCase();
+      if (titleLower.includes("lofi") || titleLower.includes("chill") || titleLower.includes("relax") || titleLower.includes("coffee") || titleLower.includes("sunday")) genre = "Lofi/Chill";
+      else if (titleLower.includes("hip hop") || titleLower.includes("rap") || titleLower.includes("trap") || titleLower.includes("banger")) genre = "Hip-Hop";
+      else if (titleLower.includes("synth") || titleLower.includes("retro") || titleLower.includes("electro") || titleLower.includes("dance") || titleLower.includes("edm")) genre = "Electronic";
+      else if (titleLower.includes("rock") || titleLower.includes("metal") || titleLower.includes("classic")) genre = "Rock";
+      else if (track.artist?.toLowerCase().includes("ilayaraja") || track.artist?.toLowerCase().includes("rahman") || titleLower.includes("tamil") || track.artist?.toLowerCase().includes("anirudh")) genre = "Tamil Hits";
+      
+      genreCounts[genre] = (genreCounts[genre] || 0) + 1;
+
+      let mood = "Chill";
+      if (titleLower.includes("workout") || titleLower.includes("gym") || titleLower.includes("motivation") || titleLower.includes("energetic")) mood = "Energetic";
+      else if (titleLower.includes("sleep") || titleLower.includes("calm") || titleLower.includes("relaxing") || titleLower.includes("nature")) mood = "Peaceful";
+      else if (titleLower.includes("sad") || titleLower.includes("breakup") || titleLower.includes("failure") || titleLower.includes("valigal")) mood = "Melancholic";
+      
+      moodCounts[mood] = (moodCounts[mood] || 0) + 1;
+    });
+
+    const getTop = (counts) => {
+      let topItem = "Unknown";
+      let maxCount = 0;
+      Object.entries(counts).forEach(([item, count]) => {
+        if (count > maxCount) {
+          maxCount = count;
+          topItem = item;
+        }
+      });
+      return topItem;
+    };
+
+    const topArtist = getTop(artistCounts);
+    const topGenre = getTop(genreCounts);
+    const dominantMood = getTop(moodCounts);
+
+    return {
+      topArtist,
+      topGenre,
+      dominantMood,
+      stats: {
+        artistsCount: Object.keys(artistCounts).length,
+        genres: Object.entries(genreCounts).map(([name, val]) => ({ name, percentage: Math.round((val / playHistory.length) * 100) })),
+        moods: Object.entries(moodCounts).map(([name, val]) => ({ name, percentage: Math.round((val / playHistory.length) * 100) }))
+      }
+    };
+  };
 
   return (
-    <AudioContext.Provider value={{ currentTrack, isPlaying, isBuffering, playTrack, togglePlay, progress, duration, seekTo, playNext, playPrevious, stopAudio, playHistory }}>
+    <AudioContext.Provider value={{
+      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, progress, duration, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle,
+      likedTracks, toggleLikeTrack, isTrackLiked,
+      customPlaylists, setCustomPlaylists, createPlaylist, deletePlaylist, renamePlaylist, addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
+      contextPlaylist, setContextPlaylist,
+      downloadTrack, deleteDownloadedTrack,
+      sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, getUserTasteProfile
+    }}>
       {children}
-      {mounted && currentTrack && silenceSrc && (
+      {mounted && silenceSrc && (
         <audio 
-          ref={audioRef}
+          ref={silenceAudioRef}
           src={silenceSrc}
           loop
+          playsInline
+          style={{ display: "none" }}
+        />
+      )}
+      {mounted && currentTrack && (
+        <audio 
+          ref={audioRef}
           style={{ display: "none" }}
         />
       )}

@@ -20,7 +20,16 @@ export default function BottomNav() {
         const Icon = item.icon;
         const isActive = pathname === item.href;
         return (
-          <Link href={item.href} key={item.name} className={`${styles.navItem} ${isActive ? styles.active : ""}`}>
+          <Link 
+            href={item.href} 
+            key={item.name} 
+            className={`${styles.navItem} ${isActive ? styles.active : ""}`}
+            onClick={() => {
+              if (typeof navigator !== "undefined" && navigator.vibrate) {
+                navigator.vibrate(10);
+              }
+            }}
+          >
             <Icon size={28} weight={isActive ? "fill" : "regular"} />
             <span className={styles.navLabel}>{item.name}</span>
           </Link>

@@ -1,9 +1,9 @@
 "use client";
 import styles from "./page.module.css";
 import { useState, useEffect } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useUser } from "@/lib/clerk";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users } from "@phosphor-icons/react";
+import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } from "@phosphor-icons/react";
 import Link from "next/link";
 
 const FRIEND_PROFILES = [
@@ -50,16 +50,98 @@ function CompatibilityBar({ label, value, color }) {
 
 export default function Blend() {
   const { user, isLoaded } = useUser();
-  const { playTrack, currentTrack, isPlaying, togglePlay } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, getUserTasteProfile } = useAudio();
+  
+  const tasteProfile = getUserTasteProfile();
+  const myGenres = (tasteProfile && tasteProfile.stats && tasteProfile.stats.genres && tasteProfile.stats.genres.length > 0)
+    ? tasteProfile.stats.genres.slice(0, 3).map(g => g.name)
+    : ["Electronic", "Tamil", "Chill"];
+  const myQuery = myGenres.join(" ") + " songs";
 
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [phase, setPhase] = useState("select"); // select | blending | result
   const [blendTracks, setBlendTracks] = useState([]);
   const [score, setScore] = useState(null);
   const [loadingBlend, setLoadingBlend] = useState(false);
+  const [incomingInvite, setIncomingInvite] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const inviteCode = urlParams.get("invite");
+      if (inviteCode) {
+        setIncomingInvite(inviteCode);
+      }
+    }
+  }, []);
+
+  const acceptInviteAndBlend = async () => {
+    const inviter = FRIEND_PROFILES[0]; // Simulate Arun
+    setSelectedFriend(inviter);
+    setIncomingInvite(null);
+    setPhase("blending");
+    setLoadingBlend(true);
+
+    try {
+      const [myRes, friendRes] = await Promise.all([
+        fetch(`/api/search?q=${encodeURIComponent(myQuery)}`),
+        fetch(`/api/search?q=${encodeURIComponent(inviter.query)}`),
+      ]);
+      const myData = await myRes.json();
+      const friendData = await friendRes.json();
+
+      const myTracks = myData.tracks?.slice(0, 8) || [];
+      const friendTracks = friendData.tracks?.slice(0, 8) || [];
+
+      const combined = [];
+      const maxLen = Math.max(myTracks.length, friendTracks.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (i < myTracks.length) combined.push({ ...myTracks[i], owner: "me" });
+        if (i < friendTracks.length) combined.push({ ...friendTracks[i], owner: "friend" });
+      }
+
+      for (let i = combined.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [combined[i], combined[j]] = [combined[j], combined[i]];
+      }
+
+      setBlendTracks(combined.slice(0, 15));
+
+      const genreOverlap = Math.floor(Math.random() * 25 + 55);
+      const energyMatch = Math.floor(Math.random() * 30 + 50);
+      const tempoSync = Math.floor(Math.random() * 35 + 45);
+      const overall = Math.round((genreOverlap + energyMatch + tempoSync) / 3);
+
+      setScore({ overall, genreOverlap, energyMatch, tempoSync });
+      
+      await new Promise(r => setTimeout(r, 2500));
+      setPhase("result");
+    } catch (e) {
+      console.error(e);
+      setPhase("select");
+    } finally {
+      setLoadingBlend(false);
+    }
+  };
 
   const myName = isLoaded && user ? user.firstName || "You" : "You";
   const myAvatar = isLoaded && user ? user.imageUrl : null;
+
+  const handleInviteFriendClick = (e) => {
+    e.stopPropagation();
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
+    const inviteUrl = `${window.location.origin}/blend/join?code=blend_${Date.now()}`;
+    if (navigator.share) {
+      navigator.share({
+        title: "Aura Blend on AuraSynq",
+        text: `Vibe Check! Blend your music taste with mine on AuraSynq!`,
+        url: inviteUrl
+      }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(inviteUrl);
+      alert("Blend invite link copied to clipboard!");
+    }
+  };
 
   const startBlend = async () => {
     if (!selectedFriend) return;
@@ -69,7 +151,7 @@ export default function Blend() {
     // Fetch tracks for both users' taste
     try {
       const [myRes, friendRes] = await Promise.all([
-        fetch(`/api/search?q=${encodeURIComponent(MY_QUERY)}`),
+        fetch(`/api/search?q=${encodeURIComponent(myQuery)}`),
         fetch(`/api/search?q=${encodeURIComponent(selectedFriend.query)}`),
       ]);
       const myData = await myRes.json();
@@ -124,6 +206,43 @@ export default function Blend() {
     if (blendTracks.length) playTrack(blendTracks[0], blendTracks);
   };
 
+  // ─── PHASE: ACCEPT INVITE ──────────────────────────────
+  if (incomingInvite) {
+    const inviter = FRIEND_PROFILES[0]; // Arun
+    return (
+      <div className={styles.container}>
+        <div className={styles.header}>
+          <Link href="/" className={styles.backBtn}><ArrowLeft size={22} /></Link>
+          <div>
+            <h1>Accept Blend</h1>
+            <p>Vibe Check Invitation</p>
+          </div>
+        </div>
+
+        <div className={styles.inviteAcceptCard}>
+          <div className={styles.avatarsOverlap}>
+            {myAvatar 
+              ? <img src={myAvatar} alt="You" className={styles.acceptAvatar} />
+              : <div className={styles.avatarPlaceholderAccept}>{myName.charAt(0)}</div>
+            }
+            <img src={inviter.avatar} alt={inviter.name} className={`${styles.acceptAvatar} ${styles.friendOverlap}`} />
+          </div>
+          
+          <h2>{inviter.name} invited you to Blend!</h2>
+          <p>We'll combine your listening patterns and generate a shared playlist in seconds.</p>
+
+          <button
+            className={styles.acceptBtn}
+            onClick={acceptInviteAndBlend}
+          >
+            <Sparkle size={22} weight="fill" />
+            Accept & Sync Vibe
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ─── PHASE: SELECT FRIEND ──────────────────────────────
   if (phase === "select") {
     return (
@@ -144,7 +263,7 @@ export default function Blend() {
           <div>
             <h3>{myName}</h3>
             <div className={styles.genrePills}>
-              {MY_GENRES.map(g => <span key={g} className={styles.genrePill}>{g}</span>)}
+              {myGenres.map(g => <span key={g} className={styles.genrePill}>{g}</span>)}
             </div>
           </div>
         </div>
@@ -178,14 +297,23 @@ export default function Blend() {
           ))}
         </div>
 
-        <button
-          className={styles.blendBtn}
-          onClick={startBlend}
-          disabled={!selectedFriend}
-        >
-          <Sparkle size={20} weight="fill" />
-          Start Blend
-        </button>
+        <div className={styles.blendActionsRow}>
+          <button
+            className={styles.blendBtn}
+            onClick={startBlend}
+            disabled={!selectedFriend}
+          >
+            <Sparkle size={20} weight="fill" />
+            Start Blend
+          </button>
+          <button
+            className={styles.inviteBtn}
+            onClick={handleInviteFriendClick}
+          >
+            <UserPlus size={20} weight="bold" />
+            Invite a Friend
+          </button>
+        </div>
       </div>
     );
   }

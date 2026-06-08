@@ -2,7 +2,33 @@
 import styles from "./page.module.css";
 import { useAudio } from "@/contexts/AudioContext";
 import { Heart, Share, Play, Pause, MusicNote, DotsThreeVertical } from "@phosphor-icons/react";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
+
+const getFavoriteArtist = () => {
+  try {
+    const stored = localStorage.getItem("aurasynq_play_history");
+    if (!stored) return null;
+    const history = JSON.parse(stored);
+    if (!history || history.length === 0) return null;
+    
+    const counts = {};
+    let maxArtist = null;
+    let maxCount = 0;
+    
+    for (const track of history) {
+      if (!track.artist) continue;
+      const artist = track.artist.trim();
+      counts[artist] = (counts[artist] || 0) + 1;
+      if (counts[artist] > maxCount) {
+        maxCount = counts[artist];
+        maxArtist = artist;
+      }
+    }
+    return maxArtist;
+  } catch (e) {
+    return null;
+  }
+};
 
 const QUERIES = [
   "trending pop songs 2024",
@@ -17,8 +43,6 @@ export default function Discover() {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [liked, setLiked] = useState({});
-  const containerRef = useRef(null);
-  const observerRef = useRef(null);
   const loadedRef = useRef(false);
 
   useEffect(() => {
@@ -27,7 +51,11 @@ export default function Discover() {
 
     async function fetchTracks() {
       try {
-        const query = QUERIES[Math.floor(Math.random() * QUERIES.length)];
+        const favArtist = getFavoriteArtist();
+        let query = QUERIES[Math.floor(Math.random() * QUERIES.length)];
+        if (favArtist) {
+          query = `${query} ${favArtist}`;
+        }
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         if (data.tracks?.length) {
@@ -47,30 +75,6 @@ export default function Discover() {
       if (saved) setLiked(JSON.parse(saved));
     } catch (e) {}
   }, []);
-
-  useEffect(() => {
-    if (!tracks.length) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-            const trackId = entry.target.dataset.trackId;
-            const track = tracks.find((t) => t.id === trackId);
-            if (track && currentTrack?.id !== track.id) {
-              playTrack(track, tracks);
-            }
-          }
-        });
-      },
-      { threshold: 0.6, root: containerRef.current }
-    );
-
-    const items = document.querySelectorAll("[data-track-id]");
-    items.forEach((el) => observerRef.current.observe(el));
-
-    return () => observerRef.current?.disconnect();
-  }, [tracks]);
 
   const toggleLike = (trackId) => {
     setLiked((prev) => {
@@ -100,7 +104,7 @@ export default function Discover() {
   }
 
   return (
-    <div className={styles.feedContainer} ref={containerRef}>
+    <div className={styles.feedContainer}>
       {tracks.map((track) => {
         const isActive = currentTrack?.id === track.id;
         const isLiked = liked[track.id];

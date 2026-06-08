@@ -2,7 +2,9 @@ import "./globals.css";
 import { Inter } from "next/font/google";
 import AppShell from "@/components/AppShell";
 import { AudioProvider } from "@/contexts/AudioContext";
-import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkProvider } from "@/lib/clerk";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Suspense } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -10,6 +12,9 @@ export const metadata = {
   title: "AuraSynq",
   description: "Immersive Social Music App",
   manifest: "/manifest.json",
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export const viewport = {
@@ -23,19 +28,26 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <ClerkProvider>
-      <html lang="en">
-        <body className={inter.className}>
-          <AudioProvider>
-            <div className="app-container">
-              <main className="main-content" style={{ paddingBottom: "0" }}>
-                {children}
-              </main>
-              <AppShell />
-            </div>
-          </AudioProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: "window.Capacitor = window.Capacitor || {}; if (typeof window.Capacitor.triggerEvent !== 'function') { window.Capacitor.triggerEvent = function () { return false; }; }" }} />
+      </head>
+      <body className={inter.className}>
+        <ClerkProvider>
+          <ErrorBoundary>
+            <AudioProvider>
+              <div className="app-container">
+                <main className="main-content" style={{ paddingBottom: "0" }}>
+                  {children}
+                </main>
+                <Suspense fallback={null}>
+                  <AppShell />
+                </Suspense>
+              </div>
+            </AudioProvider>
+          </ErrorBoundary>
+        </ClerkProvider>
+      </body>
+    </html>
   );
 }

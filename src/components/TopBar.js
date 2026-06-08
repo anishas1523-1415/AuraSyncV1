@@ -1,7 +1,6 @@
 "use client";
 import styles from './TopBar.module.css';
-import { UserButton, useUser } from '@clerk/nextjs';
-import { dark } from '@clerk/themes';
+import { UserButton, useUser, dark } from '@/lib/clerk';
 import { Bell, Users, Waves } from '@phosphor-icons/react';
 import Link from 'next/link';
 

@@ -240,3 +240,27 @@
 }
 
 .genreCard:hover .genreImg { transform: rotate(15deg) scale(1.1); }
+
+.resultActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.addBtn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.addBtn:hover {
+  color: var(--primary-color);
+}

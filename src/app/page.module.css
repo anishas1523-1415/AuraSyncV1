@@ -56,6 +56,30 @@
     inset 0 0 30px rgba(0, 0, 0, 0.3);
 }
 
+.forYouBubble {
+  background: rgba(236, 72, 153, 0.08); /* Pink-purple themed semi-transparent background */
+  border: 1.8px solid transparent;
+  background-image: linear-gradient(rgba(9, 13, 24, 0.6), rgba(9, 13, 24, 0.6)), linear-gradient(135deg, #ec4899, #8e54e9);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow:
+    0 0 25px rgba(236, 72, 153, 0.45),
+    0 0 50px rgba(142, 84, 233, 0.25),
+    inset 0 0 20px rgba(236, 72, 153, 0.2);
+  animation: floatBubble 9s ease-in-out infinite alternate, pulseGlow 3s ease-in-out infinite alternate !important;
+  font-size: 0.82rem;
+  letter-spacing: 2.5px;
+  text-shadow: 0 0 12px #ec4899, 0 0 20px #8e54e9;
+}
+
+.forYouBubble:hover {
+  transform: scale(1.15) !important;
+  box-shadow:
+    0 0 40px rgba(236, 72, 153, 0.8),
+    0 0 80px rgba(142, 84, 233, 0.5),
+    inset 0 0 30px rgba(236, 72, 153, 0.4) !important;
+}
+
 .bubble:nth-child(even) {
   animation-duration: 11s;
   animation-direction: alternate-reverse;
@@ -68,4 +92,19 @@
   33%  { transform: translateY(-14px) rotate(2deg);   }
   66%  { transform: translateY(7px)   rotate(-1.5deg);}
   100% { transform: translateY(-9px)  rotate(1deg);   }
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow:
+      0 0 20px rgba(236, 72, 153, 0.35),
+      0 0 40px rgba(142, 84, 233, 0.18),
+      inset 0 0 15px rgba(236, 72, 153, 0.15);
+  }
+  100% {
+    box-shadow:
+      0 0 35px rgba(236, 72, 153, 0.65),
+      0 0 65px rgba(142, 84, 233, 0.4),
+      inset 0 0 25px rgba(236, 72, 153, 0.35);
+  }
 }

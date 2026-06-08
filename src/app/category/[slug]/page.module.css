@@ -64,13 +64,19 @@
   font-weight: 500;
 }
 
-.playAllBtn {
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1.5rem;
   position: relative;
   z-index: 2;
+}
+
+.playAllBtn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 1.5rem;
   padding: 0.75rem 1.8rem;
   border: none;
   border-radius: 30px;
@@ -84,6 +90,41 @@
 
 .playAllBtn:hover { transform: scale(1.05); box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
 .playAllBtn:active { transform: scale(0.97); }
+
+.syncBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 30px;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+}
+
+.syncBtn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: scale(1.03);
+}
+
+.synced {
+  border-color: rgba(0, 255, 204, 0.3) !important;
+  background: rgba(0, 255, 204, 0.1) !important;
+  color: #00ffcc !important;
+  box-shadow: 0 0 10px rgba(0, 255, 204, 0.1);
+}
+
+.syncIcon {
+  font-size: 1rem;
+  display: inline-block;
+  vertical-align: middle;
+}
 
 /* Track List */
 .trackList {
@@ -169,12 +210,38 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  transition: color 0.2s;
+}
+
+.trackActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.2s;
 }
 
-.trackItem:hover .playBtn,
-.activeTrack .playBtn { opacity: 1; }
+.addBtn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.addBtn:hover {
+  color: #a855f7;
+}
+
+.trackItem:hover .trackActions,
+.activeTrack .trackActions {
+  opacity: 1;
+}
 
 /* Skeleton */
 .skeletonItem {

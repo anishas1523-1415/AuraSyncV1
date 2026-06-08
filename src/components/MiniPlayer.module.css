@@ -1,6 +1,6 @@
 .miniPlayer {
   position: fixed;
-  bottom: 15px; /* Aligned with AuraDial */
+  bottom: calc(15px + env(safe-area-inset-bottom, 0px));
   left: 15px;
   right: 85px; /* Leaves room for AuraDial */
   height: 60px;

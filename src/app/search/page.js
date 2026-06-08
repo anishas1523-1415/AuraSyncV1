@@ -1,9 +1,10 @@
 "use client";
 import styles from "./page.module.css";
-import { MagnifyingGlass, Play, ClockCounterClockwise, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus } from "@phosphor-icons/react";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
+import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 
@@ -24,8 +25,10 @@ export default function Search() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [activeModalTrack, setActiveModalTrack] = useState(null);
   const [recentSearches, setRecentSearches] = useState([]);
   const inputRef = useRef(null);
+  const lastSearchedRef = useRef("");
 
   useEffect(() => {
     try {
@@ -56,6 +59,7 @@ export default function Search() {
   const doSearch = async (searchQuery) => {
     const q = (searchQuery || query).trim();
     if (!q) return;
+    lastSearchedRef.current = q;
     setLoading(true);
     saveRecent(q);
     try {
@@ -69,6 +73,36 @@ export default function Search() {
     }
   };
 
+  // Debounced typing search
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+
+    if (trimmed === lastSearchedRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      lastSearchedRef.current = trimmed;
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
+        const data = await res.json();
+        if (data.tracks) setResults(data.tracks);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter") doSearch();
   };
@@ -80,6 +114,13 @@ export default function Search() {
   const handleRecentClick = (term) => {
     setQuery(term);
     doSearch(term);
+  };
+
+  const handlePlayTrack = (track, trackList) => {
+    if (query) {
+      saveRecent(query);
+    }
+    playTrack(track, trackList);
   };
 
   return (
@@ -116,13 +157,26 @@ export default function Search() {
           <h2>Search Results <span className={styles.count}>{results.length}</span></h2>
           <div className={styles.resultsList}>
             {results.map((track) => (
-              <div key={track.id} className={styles.resultItem} onClick={() => playTrack(track, results)}>
+              <div key={track.id} className={styles.resultItem} onClick={() => handlePlayTrack(track, results)}>
                 <img src={track.cover} alt={track.title} className={styles.resultCover} />
                 <div className={styles.resultInfo}>
-                  <h4>{track.title}</h4>
+                  <h4>{track.title?.split("|")[0].split("(")[0].trim()}</h4>
                   <p>{track.artist}</p>
                 </div>
-                <div className={styles.playIcon}><Play size={20} weight="fill" /></div>
+                
+                <div className={styles.resultActions}>
+                  <button
+                    className={styles.addBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveModalTrack(track);
+                    }}
+                    title="Add to Playlist"
+                  >
+                    <Plus size={18} />
+                  </button>
+                  <div className={styles.playIcon}><Play size={20} weight="fill" /></div>
+                </div>
               </div>
             ))}
           </div>
@@ -168,6 +222,13 @@ export default function Search() {
             </div>
           </section>
         </>
+      )}
+
+      {activeModalTrack && (
+        <AddToPlaylistModal 
+          track={activeModalTrack} 
+          onClose={() => setActiveModalTrack(null)} 
+        />
       )}
     </div>
   );
