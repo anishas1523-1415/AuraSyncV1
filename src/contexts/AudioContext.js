@@ -939,13 +939,13 @@ export function AudioProvider({ children }) {
         navigator.mediaSession.setPositionState({
           duration: duration,
           playbackRate: 1.0,
-          position: progress
+          position: progressRef.current
         });
       } catch (err) {
         console.warn("MediaSession setPositionState error:", err);
       }
     }
-  }, [progress, duration, currentTrack?.id]);
+  }, [duration, currentTrack?.id]);
 
   // History, liked songs, and custom playlists are now initialized lazily in useState.
 
