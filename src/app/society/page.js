@@ -5,6 +5,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { useUser } from "@/lib/clerk";
 import { Users, Microphone, MusicNote, Heartbeat, Chat, ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
+import { syncEngine } from "@/lib/syncEngine";
 
 const MOCK_FRIENDS = [
   { id: 1, name: "Arun", avatar: "https://i.pravatar.cc/150?u=arun1", online: true },
@@ -37,6 +38,26 @@ export default function Society() {
   useEffect(() => {
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
+
+  // Join Room
+  useEffect(() => {
+    const userId = user?.id || `anon_${Math.floor(Math.random()*1000)}`;
+    const isHost = userId.includes("host"); // Arbitrary for demo, or set by UI
+    syncEngine.joinRoom("cyberpunk_room_1", userId, isHost);
+
+    const unsubscribe = syncEngine.onSync((data) => {
+      // Receive host's progress/playing state
+      if (!isHost && data.isPlaying !== isPlaying) {
+        // sync play state (this is simplified, would need direct AudioContext methods)
+        console.log("AuraSynq Sync: Host play state changed to", data.isPlaying);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      syncEngine.leaveRoom();
+    };
+  }, [user]);
 
   const handleCanvasTap = (e) => {
     if (typeof navigator !== "undefined" && navigator.vibrate) {

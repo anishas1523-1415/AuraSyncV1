@@ -5,6 +5,22 @@ const withPWA = withPWAInit({
   disable: process.env.NODE_ENV === "development",
   register: true,
   skipWaiting: true,
+  extendDefaultRuntimeCaching: true,
+  workboxOptions: {
+    runtimeCaching: [
+      {
+        urlPattern: /^https:\/\/lrclib\.net\/api\/.*/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'aurasynq-lyrics-cache',
+          expiration: {
+            maxEntries: 200,
+            maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
+          },
+        },
+      },
+    ],
+  },
 });
 
 /** @type {import('next').NextConfig} */

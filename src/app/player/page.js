@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { useAudio } from "@/contexts/AudioContext";
+import { useAudio, useAudioProgress } from "@/contexts/AudioContext";
 import styles from "./page.module.css";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share } from "@phosphor-icons/react";
@@ -9,9 +9,10 @@ import { useRouter } from "next/navigation";
 export default function Player() {
   const router = useRouter();
   const { 
-    currentTrack, isPlaying, isBuffering, togglePlay, progress, duration, seekTo, playNext, playPrevious, queue, removeFromQueue, playTrack, isShuffle, toggleShuffle,
+    currentTrack, isPlaying, isBuffering, togglePlay, seekTo, playNext, playPrevious, queue, removeFromQueue, playTrack, isShuffle, toggleShuffle,
     toggleLikeTrack, isTrackLiked
   } = useAudio();
+  const { progress, duration } = useAudioProgress();
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState("next");

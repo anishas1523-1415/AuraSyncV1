@@ -1,7 +1,16 @@
 "use client";
 import { createContext, useContext, useState, useRef, useEffect } from "react";
+import { useUser } from "@/lib/clerk";
+import { syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud } from "@/lib/dbSync";
+let MediaSession = null;
+if (typeof window !== "undefined") {
+  import("@capgo/capacitor-media-session").then((m) => {
+    MediaSession = m.MediaSession;
+  }).catch(err => console.warn("Failed to load Capgo MediaSession plugin", err));
+}
 
 const AudioContext = createContext();
+export const audioProgressEmitter = typeof window !== "undefined" ? new EventTarget() : null;
 
 const generateMockLyrics = (title, artist) => {
   const cleanTitle = title.split('|')[0].split('(')[0].split('-')[0].trim();
@@ -123,6 +132,17 @@ const generateMockLyrics = (title, artist) => {
 const parseLRC = (lrcText) => {
   if (!lrcText) return null;
   const lines = lrcText.split("\n");
+  const extractYoutubeId = (url) => {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+          return urlObj.searchParams.get('v') || urlObj.pathname.split('/')[2] || urlObj.pathname.slice(1);
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
   const lyrics = [];
   const timeRegex = /\[(\d+):(\d+)(?:\.(\d+))?\]/;
 
@@ -189,18 +209,28 @@ const createSilenceDataURL = (duration = 600) => {
 };
 
 export function AudioProvider({ children }) {
+  const { user } = useUser();
   const [currentTrack, setCurrentTrack] = useState(null);
   const [queue, setQueue] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const [progress, setProgressState] = useState(0);
+  
   const progressRef = useRef(0);
+  const durationRef = useRef(0);
+  
   const setProgress = (val) => {
     progressRef.current = val;
-    setProgressState(val);
+    if (audioProgressEmitter) {
+      audioProgressEmitter.dispatchEvent(new CustomEvent('progress', { detail: val }));
+    }
   };
   
-  const [duration, setDuration] = useState(0);
+  const setDuration = (val) => {
+    durationRef.current = val;
+    if (audioProgressEmitter) {
+      audioProgressEmitter.dispatchEvent(new CustomEvent('duration', { detail: val }));
+    }
+  };
   const [silenceSrc, setSilenceSrc] = useState("");
   const [mounted, setMounted] = useState(false);
   const [isYtReady, setIsYtReady] = useState(false);
@@ -318,41 +348,94 @@ export function AudioProvider({ children }) {
         tag.src = "https://www.youtube.com/iframe_api";
         const firstScriptTag = document.getElementsByTagName("script")[0];
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-      }
-
-      window.onYouTubeIframeAPIReady = () => {
-        console.log("AuraSynq Debug: YouTube Iframe API Loaded");
-        setIsYtReady(true);
-
-        const activeTrack = currentTrackRef.current;
-        if (activeTrack && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
-          try {
-            ytPlayerRef.current.loadVideoById({ videoId: activeTrack.id });
-            if (isPlayingRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-              setTimeout(() => {
-                try {
-                  ytPlayerRef.current?.playVideo();
-                } catch (err) {
-                  console.warn("YT autoplay after ready failed:", err);
-                }
-              }, 100);
-            }
-          } catch (err) {
-            console.warn("YT sync on ready failed:", err);
-          }
-        }
-      };
-
-      if (window.YT && window.YT.Player) {
+      } else {
         setIsYtReady(true);
       }
     }
-
+    
     return () => {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.destroy === 'function') {
+        ytPlayerRef.current.destroy();
+      }
       if (silenceUrl) URL.revokeObjectURL(silenceUrl);
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, []);
+
+  // Update Native Capacitor Media Session
+  useEffect(() => {
+    const updateNativeSession = async () => {
+      try {
+        if (currentTrack) {
+          await MediaSession.setMetadata({
+            title: currentTrack.title,
+            artist: currentTrack.artist,
+            album: "AuraSynq",
+            artwork: [{ src: currentTrack.cover || "", sizes: "512x512", type: "image/png" }]
+          });
+          await MediaSession.setPlaybackState({
+            playbackState: isPlaying ? "playing" : "paused",
+          });
+        }
+      } catch (err) {
+        // Ignored in browser environments
+      }
+    };
+    updateNativeSession();
+  }, [currentTrack, isPlaying]);
+
+  // Capacitor Media Session Listeners
+  useEffect(() => {
+    let playSub, pauseSub, nextSub, prevSub;
+    const initListeners = async () => {
+      try {
+        playSub = await MediaSession.addListener("play", () => {
+          togglePlay();
+        });
+        pauseSub = await MediaSession.addListener("pause", () => {
+          togglePlay();
+        });
+        nextSub = await MediaSession.addListener("nexttrack", () => {
+          playNext();
+        });
+        prevSub = await MediaSession.addListener("previoustrack", () => {
+          playPrevious();
+        });
+      } catch (e) {}
+    };
+    initListeners();
+    return () => {
+      if (playSub) playSub.remove();
+      if (pauseSub) pauseSub.remove();
+      if (nextSub) nextSub.remove();
+      if (prevSub) prevSub.remove();
+    };
+  }, []);
+
+  if (typeof window !== "undefined") {
+    window.onYouTubeIframeAPIReady = () => {
+      console.log("AuraSynq Debug: YouTube Iframe API Loaded");
+      setIsYtReady(true);
+
+      const activeTrack = currentTrackRef.current;
+      if (activeTrack && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
+        try {
+          ytPlayerRef.current.loadVideoById({ videoId: activeTrack.id });
+          if (isPlayingRef.current && typeof ytPlayerRef.current.playVideo === "function") {
+            setTimeout(() => {
+              try {
+                ytPlayerRef.current?.playVideo();
+              } catch (err) {
+                console.warn("YT autoplay after ready failed:", err);
+              }
+            }, 100);
+          }
+        } catch (err) {
+          console.warn("YT sync on ready failed:", err);
+        }
+      }
+    };
+  }
 
   const playNext = (shouldAutoPlay = isPlayingRef.current) => {
     const currentQ = queueRef.current;
@@ -442,73 +525,47 @@ export function AudioProvider({ children }) {
     }
   }, [isYtReady]);
 
-  const fetchLyricsFromApi = async (title, artist, trackId) => {
-    try {
-      const cleanTitle = title
-        .split('|')[0]
-        .split('(')[0]
-        .split('-')[0]
-        .replace(/official/i, '')
-        .replace(/video/i, '')
-        .replace(/song/i, '')
-        .replace(/lyric/i, '')
-        .replace(/audio/i, '')
-        .trim();
-        
-      const cleanArtist = artist
-        .split('-')[0]
-        .replace(/vevo/i, '')
-        .replace(/music/i, '')
-        .trim();
+  const abortControllerRef = useRef(null);
 
-      console.log(`AuraSynq Debug: Querying real lyrics for "${cleanTitle}" by "${cleanArtist}"`);
+  const fetchLyricsFromApi = async (title, artist, trackId) => {
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
+    try {
+      // Create search query favoring the artist and title
+      const searchQuery = encodeURIComponent(`${title} ${artist}`);
+      const url = `https://lrclib.net/api/search?q=${searchQuery}`;
       
-      const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(cleanArtist)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       
-      if (!res.ok) {
-        const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + cleanArtist)}`;
-        const searchRes = await fetch(searchUrl);
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          if (searchData && searchData.length > 0) {
-            const bestMatch = searchData[0];
-            const parsed = bestMatch.syncedLyrics 
-              ? parseLRC(bestMatch.syncedLyrics) 
-              : parsePlainLyrics(bestMatch.plainLyrics, bestMatch.duration);
-            
-            if (parsed) {
-              console.log("AuraSynq Debug: Found and synced search-query lyrics successfully!");
-              setCurrentTrack(prev => {
-                if (prev && prev.id === trackId) {
-                  return { ...prev, lyrics: parsed };
-                }
-                return prev;
-              });
-              return;
-            }
-          }
-        }
-        throw new Error("LrcLib search failed to return match");
-      }
+      if (!res.ok) throw new Error("LrcLib search failed");
       
       const data = await res.json();
-      const parsed = data.syncedLyrics 
-        ? parseLRC(data.syncedLyrics) 
-        : parsePlainLyrics(data.plainLyrics, data.duration);
-        
-      if (parsed) {
-        console.log("AuraSynq Debug: Found and synced direct lyrics successfully!");
+      if (!data || data.length === 0) throw new Error("No lyrics found");
+
+      const bestMatch = data[0];
+      const lyricsLines = bestMatch.syncedLyrics 
+        ? parseLRC(bestMatch.syncedLyrics) 
+        : parsePlainLyrics(bestMatch.plainLyrics, bestMatch.duration);
+      
+      if (lyricsLines && lyricsLines.length > 0) {
+        console.log("AuraSynq Debug: Found and synced search-query lyrics successfully!");
         setCurrentTrack(prev => {
           if (prev && prev.id === trackId) {
-            return { ...prev, lyrics: parsed };
+            return { ...prev, lyrics: lyricsLines };
           }
           return prev;
         });
+        return lyricsLines;
+      } else {
+        throw new Error("LrcLib search failed to return match");
       }
     } catch (err) {
+      if (err.name === 'AbortError') return null;
       console.warn("AuraSynq Debug: Failed to fetch real lyrics from database:", err);
     }
+    return null;
   };
 
   const stopAudio = () => {
@@ -536,10 +593,18 @@ export function AudioProvider({ children }) {
   const addToHistory = (track) => {
     setPlayHistory(prev => {
       const filtered = prev.filter(t => t.id !== track.id);
-      const updated = [track, ...filtered].slice(0, 20);
+      
+      // Strip heavy payloads before saving to LocalStorage to prevent quota limits
+      const lightTrack = { ...track };
+      delete lightTrack.lyrics;
+      delete lightTrack.djIntro;
+      
+      const updated = [lightTrack, ...filtered].slice(0, 20);
       try {
         localStorage.setItem('aurasynq_play_history', JSON.stringify(updated));
       } catch (e) {}
+      
+      if (user?.id) syncHistoryToCloud(updated, user.id);
       return updated;
     });
   };
@@ -851,6 +916,14 @@ export function AudioProvider({ children }) {
       navigator.mediaSession.setActionHandler("seekto", (details) => {
         if (details.seekTime !== undefined) seekTo(details.seekTime);
       });
+      
+      // Capacitor MediaSession integration
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.MediaSession) {
+        window.Capacitor.Plugins.MediaSession.setMetadata({
+          title: currentTrack.title,
+          artist: currentTrack.artist
+        });
+      }
     }
   }, [currentTrack?.id]);
 
@@ -878,21 +951,23 @@ export function AudioProvider({ children }) {
 
   // Liking implementation
   const toggleLikeTrack = (track) => {
-    if (!track) return;
     setLikedTracks(prev => {
-      const isLiked = prev.some(t => t.id === track.id);
       let updated;
+      const isLiked = prev.some(t => t.id === track.id);
       if (isLiked) {
         updated = prev.filter(t => t.id !== track.id);
       } else {
-        updated = [...prev, track];
+        const lightTrack = { ...track };
+        delete lightTrack.lyrics;
+        delete lightTrack.djIntro;
+        updated = [...prev, lightTrack];
       }
+      
       try {
         localStorage.setItem('aurasynq_liked_songs_metadata', JSON.stringify(updated));
-        const dict = {};
-        updated.forEach(t => { dict[t.id] = true; });
-        localStorage.setItem('aurasynq_liked', JSON.stringify(dict));
       } catch (e) {}
+      
+      if (user?.id) syncLikedToCloud(updated, user.id);
       return updated;
     });
   };
@@ -1132,7 +1207,7 @@ export function AudioProvider({ children }) {
 
   return (
     <AudioContext.Provider value={{
-      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, progress, duration, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle,
+      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle,
       likedTracks, toggleLikeTrack, isTrackLiked,
       customPlaylists, setCustomPlaylists, createPlaylist, deletePlaylist, renamePlaylist, addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
       contextPlaylist, setContextPlaylist,
@@ -1175,3 +1250,25 @@ export function AudioProvider({ children }) {
 }
 
 export const useAudio = () => useContext(AudioContext);
+
+export const useAudioProgress = () => {
+  const [progress, setProgressState] = useState(0);
+  const [duration, setDurationState] = useState(0);
+
+  useEffect(() => {
+    if (!audioProgressEmitter) return;
+    
+    const onProgress = (e) => setProgressState(e.detail);
+    const onDuration = (e) => setDurationState(e.detail);
+    
+    audioProgressEmitter.addEventListener('progress', onProgress);
+    audioProgressEmitter.addEventListener('duration', onDuration);
+    
+    return () => {
+      audioProgressEmitter.removeEventListener('progress', onProgress);
+      audioProgressEmitter.removeEventListener('duration', onDuration);
+    };
+  }, []);
+
+  return { progress, duration };
+};
