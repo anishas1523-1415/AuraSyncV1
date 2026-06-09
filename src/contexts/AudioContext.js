@@ -934,10 +934,10 @@ export function AudioProvider({ children }) {
   }, [isPlaying, currentTrack?.id]);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && "mediaSession" in navigator && currentTrack && duration > 0) {
+    if (typeof window !== "undefined" && "mediaSession" in navigator && currentTrack && durationRef.current > 0) {
       try {
         navigator.mediaSession.setPositionState({
-          duration: duration,
+          duration: durationRef.current,
           playbackRate: 1.0,
           position: progressRef.current
         });
@@ -945,7 +945,7 @@ export function AudioProvider({ children }) {
         console.warn("MediaSession setPositionState error:", err);
       }
     }
-  }, [duration, currentTrack?.id]);
+  }, [currentTrack?.id]);
 
   // History, liked songs, and custom playlists are now initialized lazily in useState.
 
