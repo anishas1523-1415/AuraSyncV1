@@ -53,20 +53,51 @@ export async function GET(request) {
   }
 
   try {
-    // Use local scraper (youtube-search-api) directly for near-instant results
-    const results = await ytSearch.GetListByKeyword(query, false, 15, [{type: 'video'}]);
+    const instances = [
+      "https://vid.puffyan.us",
+      "https://invidious.jing.rocks",
+      "https://yt.artemislena.eu"
+    ];
     
-    if (!results || !results.items) {
+    let results = [];
+    for (const instance of instances) {
+      try {
+        const response = await fetch(`${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, {
+          signal: AbortSignal.timeout(5000)
+        });
+        if (response.ok) {
+          results = await response.json();
+          break;
+        }
+      } catch (err) {
+        console.warn(`Invidious instance ${instance} failed:`, err);
+      }
+    }
+
+    if (!results || results.length === 0) {
+      // Fallback to youtube-search-api as a last resort, in case all instances are down
+      const ytSearch = require('youtube-search-api');
+      const fallbackResults = await ytSearch.GetListByKeyword(query, false, 15, [{type: 'video'}]);
+      if (fallbackResults && fallbackResults.items) {
+        results = fallbackResults.items.map(item => ({
+          videoId: item.id,
+          title: item.title,
+          author: item.channelTitle || 'Unknown Artist',
+          videoThumbnails: [{ url: item.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg` }]
+        }));
+      }
+    }
+
+    if (!results || results.length === 0) {
       return NextResponse.json({ tracks: [] });
     }
 
-    // Convert to track objects and then filter out videos that are not embeddable
-    const candidateTracks = results.items.map(item => ({
-      id: item.id,
+    const candidateTracks = results.slice(0, 15).map(item => ({
+      id: item.videoId,
       title: item.title,
-      artist: item.channelTitle || 'Unknown Artist',
-      cover: item.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`,
-      url: `https://www.youtube.com/watch?v=${item.id}`,
+      artist: item.author || 'Unknown Artist',
+      cover: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+      url: `https://www.youtube.com/watch?v=${item.videoId}`,
       mood: "energetic",
       hue: Math.floor(Math.random() * 360)
     }));
@@ -74,7 +105,6 @@ export async function GET(request) {
     // Save to cache
     searchCache.set(queryKey, { tracks: candidateTracks, timestamp: now });
 
-    // Return candidate tracks directly to prevent blocking the search response with multiple external API calls
     return NextResponse.json({ tracks: candidateTracks });
   } catch (error) {
     console.error('Search Error:', error);
