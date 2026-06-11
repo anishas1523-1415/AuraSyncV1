@@ -571,6 +571,8 @@ export function AudioProvider({ children }) {
                           }
                         }
                       }).catch(e => console.warn("Background caching failed", e));
+                    } else {
+                      console.error("Stream proxy failed:", streamRes.status);
                     }
                   }
                 }
@@ -580,7 +582,18 @@ export function AudioProvider({ children }) {
             }
             
             if (!audioSrc) {
-              audioSrc = track.url;
+              // If the track url is a direct audio file, use it
+              if (track.url && (track.url.includes('.mp3') || track.url.includes('.m4a') || track.url.includes('.wav'))) {
+                audioSrc = track.url;
+              } else {
+                console.warn("No valid audio source found for track:", track.title);
+                setIsBuffering(false);
+                setIsPlaying(false);
+                if (typeof window !== "undefined") {
+                  alert("Failed to play: This song is unavailable, deleted, or geoblocked on YouTube.");
+                }
+                return; // Abort playback
+              }
             }
 
             audioRef.current.src = audioSrc;
