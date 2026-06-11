@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import ytdl from '@distube/ytdl-core';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,39 +12,55 @@ export async function GET(request) {
   }
 
   try {
-    // Utilize the Cobalt API Engine - Highly resilient against YouTube datacenter blocks
-    const response = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: `https://www.youtube.com/watch?v=${id}`,
-        isAudioOnly: true,
-        aFormat: 'mp3' // Force standard audio format for maximum browser compatibility
-      }),
-      // 6-second timeout to prevent the serverless function from hanging
-      signal: AbortSignal.timeout(6000) 
+    // Utilize @distube/ytdl-core for direct, reliable extraction.
+    // If this fails on Vercel with "Sign in to confirm you're not a bot",
+    // you must change your Vercel Serverless Region to Europe (fra1 or lhr1) to bypass the US datacenter block.
+    const info = await ytdl.getInfo(id);
+    
+    const format = ytdl.chooseFormat(info.formats, { 
+      quality: 'highestaudio', 
+      filter: 'audioonly' 
     });
 
-    if (!response.ok) {
-      throw new Error(`Cobalt extraction rejected: ${response.status}`);
+    if (format && format.url) {
+      // Redirect the client browser directly to the googlevideo stream.
+      return NextResponse.redirect(format.url);
     }
     
-    const data = await response.json();
-    
-    if (data && data.url) {
-      // Instantly redirect the frontend <audio> tag to the unblocked media stream
-      return NextResponse.redirect(data.url);
-    }
-    
-    throw new Error('No audio stream URL returned by Cobalt layer');
+    throw new Error('No valid audio formats found');
 
-  } catch (err) {
-    console.error('[AuraSynq Stream Error]:', err.message);
+  } catch (error) {
+    console.error('[AuraSynq Stream Error]:', error.message);
+    
+    // Fallback array of Invidious instances if ytdl-core hits a captcha wall
+    const proxyInstances = [
+      'https://invidious.weblibre.org',
+      'https://vid.puffyan.us',
+      'https://invidious.perennialte.ch'
+    ];
+
+    for (const instance of proxyInstances) {
+      try {
+        const url = `${instance}/api/v1/videos/${id}?fields=adaptiveFormats`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data.adaptiveFormats && data.adaptiveFormats.length > 0) {
+            const audioStreams = data.adaptiveFormats.filter(stream => stream.type && stream.type.startsWith('audio'));
+            if (audioStreams.length > 0) {
+              const bestAudio = audioStreams.reduce((prev, current) => (parseInt(prev.bitrate) > parseInt(current.bitrate)) ? prev : current);
+              return NextResponse.redirect(bestAudio.url);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Fallback] ${instance} failed.`);
+      }
+    }
+
     return NextResponse.json(
-      { error: 'Audio extraction blocked by YouTube anti-bot systems.' }, 
+      { error: 'Audio extraction blocked by host provider. Change Vercel Region to fra1.' }, 
       { status: 500 }
     );
   }
