@@ -14,6 +14,14 @@ const withPWA = withPWAInit({
     ],
     runtimeCaching: [
       {
+        urlPattern: /^https:\/\/www\.youtube\.com\/.*/,
+        handler: 'NetworkOnly',
+      },
+      {
+        urlPattern: /\/api\/stream.*/,
+        handler: 'NetworkOnly',
+      },
+      {
         urlPattern: /^https:\/\/lrclib\.net\/api\/.*/i,
         handler: 'NetworkFirst',
         options: {

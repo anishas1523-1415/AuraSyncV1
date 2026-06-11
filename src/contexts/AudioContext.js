@@ -529,13 +529,26 @@ export function AudioProvider({ children }) {
       setTimeout(async () => {
         try {
           if (audioRef.current) {
-            let audioSrc = track.url;
+            const extractId = (t) => {
+              if (!t) return null;
+              if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
+              if (t.url) {
+                const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+                if (m1 && m1[1]) return m1[1];
+                const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+                if (m2 && m2[1]) return m2[1];
+              }
+              return t.id || null;
+            };
+            const trackId = extractId(track);
+            const streamUrl = `/api/stream?id=${trackId}`;
+            let audioSrc = streamUrl;
             
             // Check Cache Storage for offline playback
             try {
               if (typeof window !== "undefined" && "caches" in window) {
                 const cache = await caches.open("aurasynq_offline_audio");
-                const matchedResponse = await cache.match(track.url);
+                const matchedResponse = await cache.match(streamUrl);
                 if (matchedResponse) {
                   const blob = await matchedResponse.blob();
                   audioSrc = URL.createObjectURL(blob);
@@ -543,10 +556,10 @@ export function AudioProvider({ children }) {
                 } else {
                   if (navigator.onLine) {
                     console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                    fetch(track.url).then(async (response) => {
+                    fetch(streamUrl).then(async (response) => {
                       if (response.ok) {
                         const cacheCopy = await caches.open("aurasynq_offline_audio");
-                        await cacheCopy.put(track.url, response);
+                        await cacheCopy.put(streamUrl, response);
                         if (track.cover) {
                           const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
                           if (imgRes) await cacheCopy.put(track.cover, imgRes);
@@ -558,22 +571,6 @@ export function AudioProvider({ children }) {
               }
             } catch (cacheErr) {
               console.warn("Offline caching matching failed:", cacheErr);
-            }
-
-            if (!audioSrc || !/\\.mp3($|\\?)/i.test(audioSrc)) {
-              const extractId = (t) => {
-                if (!t) return null;
-                if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
-                if (t.url) {
-                  const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-                  if (m1 && m1[1]) return m1[1];
-                  const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-                  if (m2 && m2[1]) return m2[1];
-                }
-                return t.id || null;
-              };
-              const vId = extractId(track);
-              audioSrc = `/api/stream?id=${vId}`;
             }
 
             audioRef.current.src = audioSrc;
