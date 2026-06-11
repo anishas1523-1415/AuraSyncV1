@@ -567,7 +567,7 @@ export function AudioProvider({ children }) {
                 if (t.url) {
                   const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
                   if (m1 && m1[1]) return m1[1];
-                  const m2 = t.url.match(/youtu\\.be\\/([A-Za-z0-9_-]{11})/);
+                  const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
                   if (m2 && m2[1]) return m2[1];
                 }
                 return t.id || null;
