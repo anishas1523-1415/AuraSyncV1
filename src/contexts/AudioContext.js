@@ -541,36 +541,46 @@ export function AudioProvider({ children }) {
               return t.id || null;
             };
             const trackId = extractId(track);
-            const streamUrl = `/api/stream?id=${trackId}`;
-            let audioSrc = streamUrl;
+            const cacheKey = `/api/stream?id=${trackId}`;
+            let audioSrc = null;
             
             // Check Cache Storage for offline playback
             try {
               if (typeof window !== "undefined" && "caches" in window) {
                 const cache = await caches.open("aurasynq_offline_audio");
-                const matchedResponse = await cache.match(streamUrl);
+                const matchedResponse = await cache.match(cacheKey);
                 if (matchedResponse) {
                   const blob = await matchedResponse.blob();
                   audioSrc = URL.createObjectURL(blob);
                   console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
                 } else {
                   if (navigator.onLine) {
-                    console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                    fetch(streamUrl).then(async (response) => {
-                      if (response.ok) {
-                        const cacheCopy = await caches.open("aurasynq_offline_audio");
-                        await cacheCopy.put(streamUrl, response);
-                        if (track.cover) {
-                          const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                          if (imgRes) await cacheCopy.put(track.cover, imgRes);
+                    const streamRes = await fetch(cacheKey);
+                    if (streamRes.ok) {
+                      const data = await streamRes.json();
+                      audioSrc = data.url;
+                      
+                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
+                      fetch(data.url).then(async (response) => {
+                        if (response.ok) {
+                          const cacheCopy = await caches.open("aurasynq_offline_audio");
+                          await cacheCopy.put(cacheKey, response);
+                          if (track.cover) {
+                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
+                          }
                         }
-                      }
-                    }).catch(e => console.warn("Background caching failed", e));
+                      }).catch(e => console.warn("Background caching failed", e));
+                    }
                   }
                 }
               }
             } catch (cacheErr) {
               console.warn("Offline caching matching failed:", cacheErr);
+            }
+            
+            if (!audioSrc) {
+              audioSrc = track.url;
             }
 
             audioRef.current.src = audioSrc;
