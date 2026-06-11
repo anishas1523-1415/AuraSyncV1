@@ -555,30 +555,29 @@ export function AudioProvider({ children }) {
                   console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
                 } else {
                   if (navigator.onLine) {
-                    const streamRes = await fetch(cacheKey);
-                    if (streamRes.ok) {
-                      const data = await streamRes.json();
-                      audioSrc = data.url;
-                      
-                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                      fetch(data.url).then(async (response) => {
-                        if (response.ok) {
-                          const cacheCopy = await caches.open("aurasynq_offline_audio");
-                          await cacheCopy.put(cacheKey, response);
-                          if (track.cover) {
-                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
-                          }
+                    audioSrc = cacheKey;
+                    
+                    console.log("AuraSynq Debug: Background downloading and caching track", track.title);
+                    fetch(cacheKey).then(async (response) => {
+                      if (response.ok) {
+                        const cacheCopy = await caches.open("aurasynq_offline_audio");
+                        await cacheCopy.put(cacheKey, response);
+                        if (track.cover) {
+                          const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                          if (imgRes) await cacheCopy.put(track.cover, imgRes);
                         }
-                      }).catch(e => console.warn("Background caching failed", e));
-                    } else {
-                      console.error("Stream proxy failed:", streamRes.status);
-                    }
+                      }
+                    }).catch(e => console.warn("Background caching failed", e));
                   }
                 }
+              } else if (navigator.onLine) {
+                audioSrc = cacheKey;
               }
             } catch (cacheErr) {
               console.warn("Offline caching matching failed:", cacheErr);
+              if (navigator.onLine) {
+                audioSrc = cacheKey;
+              }
             }
             
             if (!audioSrc) {
@@ -990,6 +989,9 @@ export function AudioProvider({ children }) {
             console.warn("Audio element error:", e);
             setIsBuffering(false);
             setIsPlaying(false);
+            if (typeof window !== "undefined" && navigator.onLine) {
+              alert("Failed to play: Audio stream extraction failed or was blocked by host provider.");
+            }
           }}
         />
       )}

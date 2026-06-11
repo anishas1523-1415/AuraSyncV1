@@ -68,45 +68,48 @@ export async function GET(request) {
     }
   }
 
+  let lyricsPayload = null;
+  const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanedTitle)}&artist_name=${encodeURIComponent(artist)}`;
+
   try {
-    const query = encodeURIComponent(`${cleanedTitle} ${artist}`.trim());
-    const url = `https://lrclib.net/api/search?q=${query}`;
-    
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) throw new Error("LrcLib API error");
-    
-    const data = await res.json();
-    if (!data || data.length === 0) {
-      return NextResponse.json({ error: 'No lyrics found' }, { status: 404 });
+    if (res.ok) {
+      const data = await res.json();
+      lyricsPayload = {
+        plainLyrics: data.plainLyrics || null,
+        syncedLyrics: data.syncedLyrics || null,
+        duration: data.duration || 0
+      };
     }
-
-    const payload = {
-      plainLyrics: data[0].plainLyrics,
-      syncedLyrics: data[0].syncedLyrics,
-      duration: data[0].duration
-    };
-
-    // Save to local memory cache
-    lyricsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
-
-    // Save to Supabase DB cache
-    if (isSupabaseActive && id) {
-      try {
-        await supabase.from('song_cache').upsert({
-          id,
-          title,
-          artist,
-          url: `https://www.youtube.com/watch?v=${id}`,
-          lyrics: JSON.stringify(payload)
-        });
-      } catch (e) {
-        console.warn("Supabase lyrics cache write failed", e);
-      }
+  } catch (fetchErr) {
+    if (fetchErr.name === 'TimeoutError') {
+      console.warn('[AuraSynq Lyrics]: External API timed out. Falling back to null.');
+    } else {
+      console.warn('[AuraSynq Lyrics Fetch Error]:', fetchErr.message);
     }
-
-    return NextResponse.json(payload);
-  } catch (error) {
-    console.error('Lyrics Fetch Error:', error);
-    return NextResponse.json({ error: 'Failed to fetch lyrics' }, { status: 500 });
   }
+
+  if (!lyricsPayload) {
+    return NextResponse.json({ error: 'No lyrics found' }, { status: 404 });
+  }
+
+  // Save to local memory cache
+  lyricsCache.set(cacheKey, { data: lyricsPayload, timestamp: Date.now() });
+
+  // Save to Supabase DB cache
+  if (isSupabaseActive && id) {
+    try {
+      await supabase.from('song_cache').upsert({
+        id,
+        title,
+        artist,
+        url: `https://www.youtube.com/watch?v=${id}`,
+        lyrics: JSON.stringify(lyricsPayload)
+      });
+    } catch (e) {
+      console.warn("Supabase lyrics cache write failed", e);
+    }
+  }
+
+  return NextResponse.json(lyricsPayload);
 }
