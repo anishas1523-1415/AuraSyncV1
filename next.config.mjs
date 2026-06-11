@@ -7,10 +7,15 @@ const withPWA = withPWAInit({
   skipWaiting: true,
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
+    exclude: [
+      /^\/sign-in/,
+      /^\/sign-up/,
+      /^\/api\//
+    ],
     runtimeCaching: [
       {
         urlPattern: /^https:\/\/lrclib\.net\/api\/.*/i,
-        handler: 'CacheFirst',
+        handler: 'NetworkFirst',
         options: {
           cacheName: 'aurasynq-lyrics-cache',
           expiration: {
@@ -19,6 +24,13 @@ const withPWA = withPWAInit({
           },
         },
       },
+      {
+        urlPattern: /\/api\/.*/i,
+        handler: 'NetworkFirst',
+        options: {
+          cacheName: 'aurasynq-api-cache',
+        },
+      }
     ],
   },
 });

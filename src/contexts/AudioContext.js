@@ -336,30 +336,8 @@ export function AudioProvider({ children }) {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // Initialize dynamic script and silence generator
   useEffect(() => {
     setMounted(true);
-    const silenceUrl = createSilenceDataURL(600);
-    setSilenceSrc(silenceUrl);
-
-    if (typeof window !== "undefined") {
-      if (!window.YT) {
-        const tag = document.createElement("script");
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName("script")[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-      } else {
-        setIsYtReady(true);
-      }
-    }
-    
-    return () => {
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.destroy === 'function') {
-        ytPlayerRef.current.destroy();
-      }
-      if (silenceUrl) URL.revokeObjectURL(silenceUrl);
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
   }, []);
 
   // Update Native Capacitor Media Session
@@ -412,30 +390,6 @@ export function AudioProvider({ children }) {
     };
   }, []);
 
-  if (typeof window !== "undefined") {
-    window.onYouTubeIframeAPIReady = () => {
-      console.log("AuraSynq Debug: YouTube Iframe API Loaded");
-      setIsYtReady(true);
-
-      const activeTrack = currentTrackRef.current;
-      if (activeTrack && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
-        try {
-          ytPlayerRef.current.loadVideoById({ videoId: activeTrack.id });
-          if (isPlayingRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-            setTimeout(() => {
-              try {
-                ytPlayerRef.current?.playVideo();
-              } catch (err) {
-                console.warn("YT autoplay after ready failed:", err);
-              }
-            }, 100);
-          }
-        } catch (err) {
-          console.warn("YT sync on ready failed:", err);
-        }
-      }
-    };
-  }
 
   const playNext = (shouldAutoPlay = isPlayingRef.current) => {
     const currentQ = queueRef.current;
@@ -471,59 +425,6 @@ export function AudioProvider({ children }) {
     }
   };
 
-  // Initialize YT Player when API script is ready
-  useEffect(() => {
-    if (isYtReady && !ytPlayerRef.current) {
-      console.log("AuraSynq Debug: Instantiating YT Player...");
-      ytPlayerRef.current = new window.YT.Player("yt-player-placeholder", {
-        height: "1",
-        width: "1",
-        videoId: "",
-        playerVars: {
-          autoplay: 0,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-          origin: typeof window !== "undefined" ? window.location.origin : ""
-        },
-        events: {
-          onReady: () => {
-            console.log("AuraSynq Debug: YT Player ready for loading.");
-          },
-          onStateChange: (event) => {
-            const state = event.data;
-            if (state === window.YT.PlayerState.PLAYING) {
-              setIsPlaying(true);
-              setIsBuffering(false);
-            } else if (state === window.YT.PlayerState.PAUSED) {
-              setIsPlaying(false);
-              setIsBuffering(false);
-            } else if (state === window.YT.PlayerState.BUFFERING) {
-              setIsBuffering(true);
-            } else if (state === window.YT.PlayerState.ENDED) {
-              setIsPlaying(false);
-              setIsBuffering(false);
-              setProgress(0);
-              // Auto-advance to next song
-              playNext();
-            }
-          },
-          onError: (event) => {
-            try {
-              console.warn('AuraSynq Debug: YT Player error', event.data);
-              setIsBuffering(false);
-              setIsPlaying(false);
-            } catch (err) {
-              // ignore
-            }
-          }
-        }
-      });
-    }
-  }, [isYtReady]);
 
   const abortControllerRef = useRef(null);
 
@@ -533,21 +434,16 @@ export function AudioProvider({ children }) {
     const signal = abortControllerRef.current.signal;
 
     try {
-      // Create search query favoring the artist and title
-      const searchQuery = encodeURIComponent(`${title} ${artist}`);
-      const url = `https://lrclib.net/api/search?q=${searchQuery}`;
-      
+      const url = `/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
       const res = await fetch(url, { signal });
       
-      if (!res.ok) throw new Error("LrcLib search failed");
+      if (!res.ok) throw new Error("Lyrics API failed");
       
       const data = await res.json();
-      if (!data || data.length === 0) throw new Error("No lyrics found");
-
-      const bestMatch = data[0];
-      const lyricsLines = bestMatch.syncedLyrics 
-        ? parseLRC(bestMatch.syncedLyrics) 
-        : parsePlainLyrics(bestMatch.plainLyrics, bestMatch.duration);
+      
+      const lyricsLines = data.syncedLyrics 
+        ? parseLRC(data.syncedLyrics) 
+        : parsePlainLyrics(data.plainLyrics, data.duration);
       
       if (lyricsLines && lyricsLines.length > 0) {
         console.log("AuraSynq Debug: Found and synced search-query lyrics successfully!");
@@ -559,7 +455,7 @@ export function AudioProvider({ children }) {
         });
         return lyricsLines;
       } else {
-        throw new Error("LrcLib search failed to return match");
+        throw new Error("Lyrics API failed to return match");
       }
     } catch (err) {
       if (err.name === 'AbortError') return null;
@@ -570,9 +466,6 @@ export function AudioProvider({ children }) {
 
   const stopAudio = () => {
     try {
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
-        ytPlayerRef.current.pauseVideo();
-      }
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = '';
@@ -610,11 +503,6 @@ export function AudioProvider({ children }) {
   };
 
   const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
-    // Synchronously kickstart background audio hack on user gesture to guarantee WebView background playback
-    if (shouldAutoPlay && silenceAudioRef.current) {
-      silenceAudioRef.current.play().catch(() => {});
-    }
-
     // Set queue if provided, or build one
     if (newQueue) {
       setQueue(newQueue);
@@ -632,269 +520,111 @@ export function AudioProvider({ children }) {
         lyrics: track.lyrics || generateMockLyrics(track.title, track.artist)
       };
       setCurrentTrack(trackWithLyrics);
-      setIsPlaying(shouldAutoPlay);
-      setIsBuffering(shouldAutoPlay);
+      if (shouldAutoPlay) setIsBuffering(true);
       setProgress(0);
       setDuration(0);
       addToHistory(track);
       fetchLyricsFromApi(track.title, track.artist, track.id);
 
-      // Decide whether this is a direct audio URL (mp3) or a YouTube video.
-      const isDirectAudio = track.url && /\.mp3($|\?)/i.test(track.url);
-      currentIsHtmlRef.current = isDirectAudio;
-
-      if (isDirectAudio) {
-        // Pause any YT playback
+      setTimeout(async () => {
         try {
-          if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
-            ytPlayerRef.current.pauseVideo();
-          }
-        } catch (err) {
-          // ignore
-        }
-
-        // Use HTMLAudioElement for direct audio
-        setTimeout(async () => {
-          try {
-            if (audioRef.current) {
-              let audioSrc = track.url;
-              
-              // Check Cache Storage for offline playback
-              try {
-                if (typeof window !== "undefined" && "caches" in window) {
-                  const cache = await caches.open("aurasynq_offline_audio");
-                  const matchedResponse = await cache.match(track.url);
-                  if (matchedResponse) {
-                    const blob = await matchedResponse.blob();
-                    audioSrc = URL.createObjectURL(blob);
-                    console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
-                  } else {
-                    if (navigator.onLine) {
-                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                      fetch(track.url).then(async (response) => {
-                        if (response.ok) {
-                          const cacheCopy = await caches.open("aurasynq_offline_audio");
-                          await cacheCopy.put(track.url, response);
-                          if (track.cover) {
-                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
-                          }
+          if (audioRef.current) {
+            let audioSrc = track.url;
+            
+            // Check Cache Storage for offline playback
+            try {
+              if (typeof window !== "undefined" && "caches" in window) {
+                const cache = await caches.open("aurasynq_offline_audio");
+                const matchedResponse = await cache.match(track.url);
+                if (matchedResponse) {
+                  const blob = await matchedResponse.blob();
+                  audioSrc = URL.createObjectURL(blob);
+                  console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
+                } else {
+                  if (navigator.onLine) {
+                    console.log("AuraSynq Debug: Background downloading and caching track", track.title);
+                    fetch(track.url).then(async (response) => {
+                      if (response.ok) {
+                        const cacheCopy = await caches.open("aurasynq_offline_audio");
+                        await cacheCopy.put(track.url, response);
+                        if (track.cover) {
+                          const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                          if (imgRes) await cacheCopy.put(track.cover, imgRes);
                         }
-                      }).catch(e => console.warn("Background caching failed", e));
-                    }
+                      }
+                    }).catch(e => console.warn("Background caching failed", e));
                   }
                 }
-              } catch (cacheErr) {
-                console.warn("Offline caching matching failed:", cacheErr);
               }
+            } catch (cacheErr) {
+              console.warn("Offline caching matching failed:", cacheErr);
+            }
 
-              audioRef.current.src = audioSrc;
-              audioRef.current.currentTime = 0;
-              if (shouldAutoPlay) {
-                audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
+            if (!audioSrc || !/\\.mp3($|\\?)/i.test(audioSrc)) {
+              const extractId = (t) => {
+                if (!t) return null;
+                if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
+                if (t.url) {
+                  const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+                  if (m1 && m1[1]) return m1[1];
+                  const m2 = t.url.match(/youtu\\.be\\/([A-Za-z0-9_-]{11})/);
+                  if (m2 && m2[1]) return m2[1];
+                }
+                return t.id || null;
+              };
+              const vId = extractId(track);
+              audioSrc = `/api/stream?id=${vId}`;
+            }
+
+            audioRef.current.src = audioSrc;
+            audioRef.current.currentTime = 0;
+            if (shouldAutoPlay) {
+              try {
+                await audioRef.current.play();
+              } catch (err) {
+                console.warn('HTML audio play failed:', err);
+                setIsBuffering(false);
+                setIsPlaying(false);
               }
+            } else {
               setIsBuffering(false);
             }
-          } catch (err) {
-            console.warn('Direct audio playback failed:', err);
           }
-        }, 50);
-      } else {
-        // Try to extract a YouTube video id from url if id looks non-standard
-        const extractYoutubeId = (t) => {
-          if (!t) return null;
-          if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
-          if (t.url) {
-            const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-            if (m1 && m1[1]) return m1[1];
-            const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-            if (m2 && m2[1]) return m2[1];
-          }
-          return t.id || null;
-        };
-
-        const videoId = extractYoutubeId(track);
-        const loadVideo = () => {
-          if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === "function") {
-            try {
-              if (videoId) {
-                ytPlayerRef.current.loadVideoById({ videoId });
-              } else if (track.id) {
-                ytPlayerRef.current.loadVideoById({ videoId: track.id });
-              }
-              if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
-                setTimeout(() => {
-                  try {
-                    ytPlayerRef.current?.playVideo();
-                  } catch (err) {
-                    console.warn("YT play after load failed:", err);
-                  }
-                }, 100);
-              }
-            } catch (err) {
-              console.error("YT Player load error:", err);
-            }
-          } else {
-            setTimeout(loadVideo, 250);
-          }
-        };
-        loadVideo();
-      }
+        } catch (err) {
+          console.warn('Direct audio playback failed:', err);
+        }
+      }, 50);
     } else {
       seekTo(0);
-      setIsPlaying(shouldAutoPlay);
-      if (currentIsHtmlRef.current && audioRef.current) {
-        audioRef.current.currentTime = 0;
-        if (shouldAutoPlay) {
-          audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
-        }
-      } else if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
-        ytPlayerRef.current.seekTo(0, true);
-        if (shouldAutoPlay && typeof ytPlayerRef.current.playVideo === "function") {
-          try {
-            ytPlayerRef.current.playVideo();
-          } catch (err) {
-            console.warn("YT replay failed:", err);
-          }
-        }
+      if (shouldAutoPlay && audioRef.current) {
+        audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
       }
     }
   };
 
   const togglePlay = () => {
-    if (currentTrack) {
-      // Synchronously toggle silence audio to maintain background media session lock
-      if (silenceAudioRef.current) {
-        if (!isPlaying) {
-          silenceAudioRef.current.play().catch(() => {});
-        } else {
-          silenceAudioRef.current.pause();
-        }
-      }
-
-      // If current track is direct HTML audio, control audio element directly
-      if (currentIsHtmlRef.current && audioRef.current) {
-        if (isPlaying) {
-          audioRef.current.pause();
-          setIsPlaying(false);
-        } else {
-          audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
-          setIsPlaying(true);
-        }
+    if (currentTrack && audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
       } else {
-        setIsPlaying(!isPlaying);
+        audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
       }
     }
   };
 
   const seekTo = (seconds) => {
     if (!currentTrack) return;
-    if (currentIsHtmlRef.current && audioRef.current) {
+    if (audioRef.current) {
       try {
         audioRef.current.currentTime = seconds;
         setProgress(seconds);
       } catch (err) {
         console.warn('HTML audio seek failed:', err);
       }
-      return;
-    }
-    if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
-      try {
-        ytPlayerRef.current.seekTo(seconds, true);
-        setProgress(seconds);
-        if (audioRef.current) {
-          audioRef.current.currentTime = seconds % 600;
-        }
-      } catch (err) {
-        console.warn("YT seek failed:", err);
-      }
     }
   };
 
-  // Sync state changes with native audio player and YT player
-  useEffect(() => {
-    try {
-      if (currentIsHtmlRef.current) {
-        if (audioRef.current) {
-          if (isPlaying) {
-            audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
-            if (silenceAudioRef.current) silenceAudioRef.current.play().catch(() => {});
-          } else {
-            audioRef.current.pause();
-            if (silenceAudioRef.current) silenceAudioRef.current.pause();
-          }
-        }
-      } else if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-        if (isPlaying) {
-          ytPlayerRef.current.playVideo();
-          if (silenceAudioRef.current) silenceAudioRef.current.play().catch(() => {});
-        } else {
-          ytPlayerRef.current.pauseVideo();
-          if (silenceAudioRef.current) silenceAudioRef.current.pause();
-        }
-      }
-    } catch (err) {
-      console.warn("Playstate sync error:", err);
-    }
-  }, [isPlaying, currentTrack?.id]);
 
-  // Poll progress state
-  useEffect(() => {
-    // For YT player, poll; for HTML audio, use element events
-    if (currentIsHtmlRef.current) {
-      if (audioRef.current) {
-        const a = audioRef.current;
-        const timeHandler = () => {
-          setProgress(a.currentTime || 0);
-          setDuration(a.duration || 0);
-        };
-        const endHandler = () => {
-          setIsPlaying(false);
-          setProgress(0);
-          playNext();
-        };
-        a.addEventListener('timeupdate', timeHandler);
-        a.addEventListener('ended', endHandler);
-        if (!isPlaying) {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
-          }
-        }
-        return () => {
-          a.removeEventListener('timeupdate', timeHandler);
-          a.removeEventListener('ended', endHandler);
-        };
-      }
-    } else {
-      if (isPlaying) {
-        pollIntervalRef.current = setInterval(() => {
-          if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
-            try {
-              const curTime = ytPlayerRef.current.getCurrentTime();
-              const dur = ytPlayerRef.current.getDuration();
-              if (curTime !== undefined) setProgress(curTime);
-              if (dur !== undefined && dur > 0) setDuration(dur);
-            } catch (err) {
-              // ignore
-            }
-          }
-        }, 250);
-      } else {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
-      }
-    }
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-  }, [isPlaying, currentTrack?.id]);
 
   // Register HTML5 Media Session API metadata for lock screen integration
   useEffect(() => {
@@ -1215,36 +945,34 @@ export function AudioProvider({ children }) {
       sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, getUserTasteProfile
     }}>
       {children}
-      {mounted && silenceSrc && (
-        <audio 
-          ref={silenceAudioRef}
-          src={silenceSrc}
-          loop
-          playsInline
-          style={{ display: "none" }}
-        />
-      )}
       {mounted && currentTrack && (
         <audio 
           ref={audioRef}
           style={{ display: "none" }}
+          onPlay={() => {
+            setIsPlaying(true);
+            setIsBuffering(false);
+          }}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            setProgress(0);
+            playNext();
+          }}
+          onTimeUpdate={(e) => {
+            const a = e.target;
+            setProgress(a.currentTime || 0);
+            setDuration(a.duration || 0);
+          }}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => setIsBuffering(false)}
+          onError={(e) => {
+            console.warn("Audio element error:", e);
+            setIsBuffering(false);
+            setIsPlaying(false);
+          }}
         />
       )}
-      <div 
-        id="yt-player-container" 
-        style={{ 
-          position: "absolute", 
-          width: "1px", 
-          height: "1px", 
-          opacity: 0, 
-          pointerEvents: "none",
-          overflow: "hidden",
-          left: "-1000px",
-          top: "-1000px"
-        }}
-      >
-        <div id="yt-player-placeholder" />
-      </div>
     </AudioContext.Provider>
   );
 }

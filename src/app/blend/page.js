@@ -5,6 +5,7 @@ import { useUser } from "@/lib/clerk";
 import { useAudio } from "@/contexts/AudioContext";
 import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } from "@phosphor-icons/react";
 import Link from "next/link";
+import { supabase, isSupabaseActive } from "@/lib/supabase";
 
 const FRIEND_PROFILES = [
   {
@@ -127,10 +128,28 @@ export default function Blend() {
   const myName = isLoaded && user ? user.firstName || "You" : "You";
   const myAvatar = isLoaded && user ? user.imageUrl : null;
 
-  const handleInviteFriendClick = (e) => {
+  const handleInviteFriendClick = async (e) => {
     e.stopPropagation();
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
-    const inviteUrl = `${window.location.origin}/blend/join?code=blend_${Date.now()}`;
+    
+    let sessionUuid = `blend_${Date.now()}`;
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      sessionUuid = crypto.randomUUID();
+    }
+    
+    if (isSupabaseActive && user?.id) {
+      try {
+        await supabase.from('blend_sessions').insert({
+          id: sessionUuid,
+          creator_id: user.id,
+          creator_genres: myGenres,
+        });
+      } catch (err) {
+        console.warn("Failed to create blend session in Supabase:", err);
+      }
+    }
+
+    const inviteUrl = `${window.location.origin}/blend?invite=${sessionUuid}`;
     if (navigator.share) {
       navigator.share({
         title: "Aura Blend on AuraSynq",
