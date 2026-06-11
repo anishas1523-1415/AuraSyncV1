@@ -10,47 +10,41 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Missing track ID' }, { status: 400 });
   }
 
-  // A highly stable array of Invidious instances to bypass YouTube blocks.
-  const invidiousInstances = [
-    'https://vid.puffyan.us',
-    'https://invidious.fdn.fr',
-    'https://invidious.perennialte.ch',
-    'https://yewtu.be'
-  ];
+  try {
+    // Utilize the Cobalt API Engine - Highly resilient against YouTube datacenter blocks
+    const response = await fetch('https://api.cobalt.tools/api/json', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: `https://www.youtube.com/watch?v=${id}`,
+        isAudioOnly: true,
+        aFormat: 'mp3' // Force standard audio format for maximum browser compatibility
+      }),
+      // 6-second timeout to prevent the serverless function from hanging
+      signal: AbortSignal.timeout(6000) 
+    });
 
-  for (const instance of invidiousInstances) {
-    try {
-      // 4-second timeout per instance to keep the app fast
-      const url = `${instance}/api/v1/videos/${id}?fields=adaptiveFormats`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      
-      if (res.ok) {
-        const data = await res.json();
-        
-        if (data.adaptiveFormats && data.adaptiveFormats.length > 0) {
-          // Filter out video, keep only pure audio streams
-          const audioStreams = data.adaptiveFormats.filter(stream => 
-            stream.type && stream.type.startsWith('audio')
-          );
-          
-          if (audioStreams.length > 0) {
-            // Pick the stream with the highest bitrate for best quality
-            const bestAudio = audioStreams.reduce((prev, current) => 
-              (parseInt(prev.bitrate) > parseInt(current.bitrate)) ? prev : current
-            );
-            
-            // Redirect the user's browser straight to the hidden audio file
-            return NextResponse.redirect(bestAudio.url);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`[AuraSynq Fallback]: ${instance} failed or timed out. Trying next...`);
+    if (!response.ok) {
+      throw new Error(`Cobalt extraction rejected: ${response.status}`);
     }
-  }
+    
+    const data = await response.json();
+    
+    if (data && data.url) {
+      // Instantly redirect the frontend <audio> tag to the unblocked media stream
+      return NextResponse.redirect(data.url);
+    }
+    
+    throw new Error('No audio stream URL returned by Cobalt layer');
 
-  return NextResponse.json(
-    { error: 'Audio extraction failed. All decentralized nodes are currently blocked.' }, 
-    { status: 500 }
-  );
+  } catch (err) {
+    console.error('[AuraSynq Stream Error]:', err.message);
+    return NextResponse.json(
+      { error: 'Audio extraction blocked by YouTube anti-bot systems.' }, 
+      { status: 500 }
+    );
+  }
 }
