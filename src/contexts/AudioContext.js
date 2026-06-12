@@ -557,17 +557,23 @@ export function AudioProvider({ children }) {
                   if (navigator.onLine) {
                     audioSrc = cacheKey;
                     
-                    console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                    fetch(cacheKey).then(async (response) => {
-                      if (response.ok) {
-                        const cacheCopy = await caches.open("aurasynq_offline_audio");
-                        await cacheCopy.put(cacheKey, response);
-                        if (track.cover) {
-                          const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                          if (imgRes) await cacheCopy.put(track.cover, imgRes);
-                        }
+                    // Delay background caching by 12 seconds to prevent double-download bandwidth contention.
+                    // This allows the initial streaming audio to load and play instantly without network competition.
+                    setTimeout(() => {
+                      if (currentTrackRef.current?.id === track.id) {
+                        console.log("AuraSynq Debug: Background downloading and caching track after delay", track.title);
+                        fetch(cacheKey).then(async (response) => {
+                          if (response.ok) {
+                            const cacheCopy = await caches.open("aurasynq_offline_audio");
+                            await cacheCopy.put(cacheKey, response);
+                            if (track.cover) {
+                              const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                              if (imgRes) await cacheCopy.put(track.cover, imgRes);
+                            }
+                          }
+                        }).catch(e => console.warn("Background caching failed", e));
                       }
-                    }).catch(e => console.warn("Background caching failed", e));
+                    }, 12000);
                   }
                 }
               } else if (navigator.onLine) {
