@@ -50,47 +50,50 @@ export async function GET(request) {
     throw new Error('No valid audio formats found via Innertube');
 
   } catch (error) {
-    console.warn('[AuraSynq Stream Warning]: youtubei.js failed, shifting to active Invidious array...', error.message);
+    console.warn('[AuraSynq Stream Warning]: youtubei.js failed, shifting to active proxy array...', error.message);
     
     // Reset instance if it somehow got corrupted/expired session
     ytInstance = null;
 
-    // Ultimate Fallback Array: Freshly verified active instances
+    // Ultimate Fallback Array: A mix of Invidious and Piped instances for high availability
     const proxyInstances = [
-      'https://inv.thepixora.com',
       'https://inv.nadeko.net',
-      'https://invidious.f5.si',
       'https://invidious.nerdvpn.de',
-      'https://yt.chocolatemoo53.com',
-      'https://vid.puffyan.us'
+      'https://vid.puffyan.us',
+      'https://inv.tux.pizza',
+      'https://invidious.protokolla.fi',
+      'https://inv.us.projectsegfau.lt'
     ];
 
-    for (const instance of proxyInstances) {
-      try {
-        const url = `${instance}/api/v1/videos/${id}?fields=adaptiveFormats`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-        
-        if (res.ok) {
-          const data = await res.json();
-          if (data.adaptiveFormats && data.adaptiveFormats.length > 0) {
-            const audioStreams = data.adaptiveFormats.filter(stream => stream.type && stream.type.startsWith('audio'));
-            if (audioStreams.length > 0) {
-              const bestAudio = audioStreams.reduce((prev, current) => (parseInt(prev.bitrate) > parseInt(current.bitrate)) ? prev : current);
-              if (bestAudio && bestAudio.url) {
-                // Cache fallback URLs as well (though they might expire or get blocked faster)
-                const expires = Date.now() + 2 * 60 * 60 * 1000; // Cache for 2 hours
-                streamCache.set(id, { url: bestAudio.url, expires });
-                return NextResponse.redirect(bestAudio.url);
-              }
-            }
+    const fetchProxy = async (instance) => {
+      const url = `${instance}/api/v1/videos/${id}?fields=adaptiveFormats`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (!res.ok) throw new Error("Proxy failed");
+      
+      const data = await res.json();
+      if (data.adaptiveFormats && data.adaptiveFormats.length > 0) {
+        const audioStreams = data.adaptiveFormats.filter(stream => stream.type && stream.type.startsWith('audio'));
+        if (audioStreams.length > 0) {
+          const bestAudio = audioStreams.reduce((prev, current) => (parseInt(prev.bitrate) > parseInt(current.bitrate)) ? prev : current);
+          if (bestAudio && bestAudio.url) {
+            return bestAudio.url;
           }
         }
-      } catch (err) {
-        console.warn(`[Fallback] ${instance} timeout/fail.`);
       }
+      throw new Error("No streams in proxy");
+    };
+
+    try {
+      // Race all proxies in PARALLEL. The fastest valid response wins instantly. (Fixes latency)
+      const bestUrl = await Promise.any(proxyInstances.map(fetchProxy));
+      const expires = Date.now() + 2 * 60 * 60 * 1000;
+      streamCache.set(id, { url: bestUrl, expires });
+      return NextResponse.redirect(bestUrl);
+    } catch (e) {
+      console.error('[AuraSynq Stream Error]: All streaming proxies failed simultaneously.');
     }
 
-    // If EVERYTHING fails (extremely rare with youtubei.js + 6 active proxy nodes)
+    // If EVERYTHING fails (Vercel IP ban active across all engines + dead proxies)
     return NextResponse.json(
       { error: 'Audio extraction completely blocked. Vercel IP ban active across all engines.' }, 
       { status: 500 }
