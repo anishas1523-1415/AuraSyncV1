@@ -42,7 +42,6 @@
   transition: all 0.2s;
   box-shadow: 0 4px 15px rgba(0,0,0,0.3);
   touch-action: manipulation;
-  pointer-events: auto;
   cursor: pointer;
 }
 

@@ -526,99 +526,108 @@ export function AudioProvider({ children }) {
       addToHistory(track);
       fetchLyricsFromApi(track.title, track.artist, track.id);
 
-      setTimeout(async () => {
+      const extractId = (t) => {
+        if (!t) return null;
+        if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
+        if (t.url) {
+          const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+          if (m1 && m1[1]) return m1[1];
+          const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+          if (m2 && m2[1]) return m2[1];
+        }
+        return t.id || null;
+      };
+      const trackId = extractId(track);
+      const cacheKey = `/api/stream?id=${trackId}`;
+      let audioSrc = (typeof navigator !== "undefined" && navigator.onLine) ? cacheKey : null;
+
+      (async () => {
         try {
           if (audioRef.current) {
-            const extractId = (t) => {
-              if (!t) return null;
-              if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
-              if (t.url) {
-                const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-                if (m1 && m1[1]) return m1[1];
-                const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-                if (m2 && m2[1]) return m2[1];
+            // Fast track playback if online
+            if (audioSrc) {
+              audioRef.current.src = audioSrc;
+              audioRef.current.currentTime = 0;
+              if (shouldAutoPlay) {
+                audioRef.current.play().catch(err => {
+                  console.warn('HTML audio play failed:', err);
+                  setIsBuffering(false);
+                  setIsPlaying(false);
+                });
+              } else {
+                setIsBuffering(false);
               }
-              return t.id || null;
-            };
-            const trackId = extractId(track);
-            const cacheKey = `/api/stream?id=${trackId}`;
-            let audioSrc = null;
-            
-            // Check Cache Storage for offline playback
+            }
+
+            // Background cache check
             try {
               if (typeof window !== "undefined" && "caches" in window) {
                 const cache = await caches.open("aurasynq_offline_audio");
                 const matchedResponse = await cache.match(cacheKey);
                 if (matchedResponse) {
-                  const blob = await matchedResponse.blob();
-                  audioSrc = URL.createObjectURL(blob);
-                  console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
-                } else {
-                  if (navigator.onLine) {
-                    audioSrc = cacheKey;
-                    
-                    // Delay background caching by 12 seconds to prevent double-download bandwidth contention.
-                    // This allows the initial streaming audio to load and play instantly without network competition.
-                    setTimeout(() => {
-                      if (currentTrackRef.current?.id === track.id) {
-                        console.log("AuraSynq Debug: Background downloading and caching track after delay", track.title);
-                        fetch(cacheKey).then(async (response) => {
-                          if (response.ok) {
-                            const cacheCopy = await caches.open("aurasynq_offline_audio");
-                            await cacheCopy.put(cacheKey, response);
-                            if (track.cover) {
-                              const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                              if (imgRes) await cacheCopy.put(track.cover, imgRes);
-                            }
-                          }
-                        }).catch(e => console.warn("Background caching failed", e));
+                  if (!audioSrc) { // We are offline, use cache
+                    const blob = await matchedResponse.blob();
+                    audioSrc = URL.createObjectURL(blob);
+                    console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
+                    if (audioRef.current && currentTrackRef.current?.id === track.id) {
+                      audioRef.current.src = audioSrc;
+                      audioRef.current.currentTime = 0;
+                      if (shouldAutoPlay) {
+                        audioRef.current.play().catch(e => console.warn(e));
+                      } else {
+                        setIsBuffering(false);
                       }
-                    }, 12000);
+                    }
                   }
+                } else if (navigator.onLine) {
+                  // Delay background caching to prioritize streaming
+                  setTimeout(() => {
+                    if (currentTrackRef.current?.id === track.id) {
+                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
+                      fetch(cacheKey).then(async (response) => {
+                        if (response.ok) {
+                          const cacheCopy = await caches.open("aurasynq_offline_audio");
+                          await cacheCopy.put(cacheKey, response);
+                          if (track.cover) {
+                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
+                          }
+                        }
+                      }).catch(e => console.warn("Background caching failed", e));
+                    }
+                  }, 12000);
                 }
-              } else if (navigator.onLine) {
-                audioSrc = cacheKey;
               }
             } catch (cacheErr) {
               console.warn("Offline caching matching failed:", cacheErr);
-              if (navigator.onLine) {
-                audioSrc = cacheKey;
-              }
             }
             
             if (!audioSrc) {
-              // If the track url is a direct audio file, use it
               if (track.url && (track.url.includes('.mp3') || track.url.includes('.m4a') || track.url.includes('.wav'))) {
                 audioSrc = track.url;
+                if (audioRef.current && currentTrackRef.current?.id === track.id) {
+                  audioRef.current.src = audioSrc;
+                  audioRef.current.currentTime = 0;
+                  if (shouldAutoPlay) {
+                    audioRef.current.play().catch(e => console.warn(e));
+                  } else {
+                    setIsBuffering(false);
+                  }
+                }
               } else {
                 console.warn("No valid audio source found for track:", track.title);
                 setIsBuffering(false);
                 setIsPlaying(false);
                 if (typeof window !== "undefined") {
-                  alert("Failed to play: This song is unavailable, deleted, or geoblocked on YouTube.");
+                  alert("Failed to play: This song is unavailable offline.");
                 }
-                return; // Abort playback
               }
-            }
-
-            audioRef.current.src = audioSrc;
-            audioRef.current.currentTime = 0;
-            if (shouldAutoPlay) {
-              try {
-                await audioRef.current.play();
-              } catch (err) {
-                console.warn('HTML audio play failed:', err);
-                setIsBuffering(false);
-                setIsPlaying(false);
-              }
-            } else {
-              setIsBuffering(false);
             }
           }
         } catch (err) {
           console.warn('Direct audio playback failed:', err);
         }
-      }, 50);
+      })();
     } else {
       seekTo(0);
       if (shouldAutoPlay && audioRef.current) {
