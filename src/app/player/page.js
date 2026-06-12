@@ -125,17 +125,22 @@ export default function Player() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
+  const clickTimeout = useRef(null);
+
   const handleTap = (e) => {
     const now = Date.now();
     const timeDiff = now - lastClickTime.current;
     
     if (timeDiff < 300) {
+      clearTimeout(clickTimeout.current);
       if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
       setShowLyrics(prev => !prev);
       setShowQueue(false);
     } else {
-      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
-      togglePlay();
+      clickTimeout.current = setTimeout(() => {
+        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
+        togglePlay();
+      }, 300);
     }
     lastClickTime.current = now;
   };
@@ -284,6 +289,7 @@ export default function Player() {
               <button 
                 className={`${styles.cardActionBtn} ${styles.cardShareBtn}`} 
                 onClick={handleShareClick}
+                onPointerDown={(e) => e.stopPropagation()}
                 title="Share Song"
               >
                 <Share size={22} />
@@ -292,6 +298,7 @@ export default function Player() {
               <button 
                 className={`${styles.cardActionBtn} ${styles.cardLikeBtn} ${isLiked ? styles.liked : ""}`}
                 onClick={handleLikeClick}
+                onPointerDown={(e) => e.stopPropagation()}
                 title={isLiked ? "Unlike Song" : "Like Song"}
               >
                 <Heart size={24} weight={isLiked ? "fill" : "regular"} />

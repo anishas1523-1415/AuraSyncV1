@@ -14,119 +14,12 @@ export const audioProgressEmitter = typeof window !== "undefined" ? new EventTar
 
 const generateMockLyrics = (title, artist) => {
   const cleanTitle = title.split('|')[0].split('(')[0].split('-')[0].trim();
-  
-  // Custom themed lyrics depending on keywords in title
-  const isSad = title.toLowerCase().includes('sad') || title.toLowerCase().includes('love failure') || title.toLowerCase().includes('breakup') || title.toLowerCase().includes('valigal') || title.toLowerCase().includes('vazhi');
-  const isHappy = title.toLowerCase().includes('happy') || title.toLowerCase().includes('kuthu') || title.toLowerCase().includes('dance') || title.toLowerCase().includes('mass') || title.toLowerCase().includes('danga');
-  const isRomantic = !isSad && !isHappy; // Default to romantic/melodic
-  
-  let lyricTemplate = [];
-  
-  if (isSad) {
-    lyricTemplate = [
-      "வலிகள் நிறைந்த என் நெஞ்சமே...",
-      "Why did you leave me in the dark?",
-      "கண்ணீர் துளிகள் வழியுதே அன்பே...",
-      "Holding onto memories of us...",
-      "நீ இல்லாமல் வாழ வழியுமில்லை...",
-      "Every shadow looks like your face...",
-      "நெஞ்சில் ஓடும் காயங்கள் ஆறவில்லை...",
-      "Lost in the silence of your goodbye...",
-      "மறக்க நினைக்கிறேன் மறக்க முடியாமல்...",
-      "Will the sun ever rise again?"
-    ];
-  } else if (isHappy) {
-    lyricTemplate = [
-      "ஆட்டத்த போடு தம்பி இன்னைக்கு...",
-      "Feel the rhythm, let your body move!",
-      "மகிழ்ச்சி பொங்குது நெஞ்சுக்குள்ள...",
-      "Turn up the music, enjoy the vibe!",
-      "வாழ்க்கை ஒரு முறை கொண்டாடுவோம்...",
-      "Sing out loud, let the worries fade!",
-      "புதுப்பாதை தேடி ஓடுவோம்...",
-      "Dance with the stars, touch the sky!",
-      "நெஞ்சில் உற்சாகம் குறையாமலே...",
-      "This is our time, make it count!"
-    ];
-  } else {
-    // Romantic/Melodic
-    lyricTemplate = [
-      "உன் விழி பார்த்த நொடி முதல்...",
-      "Every beat of my heart speaks your name...",
-      "என் மூச்சில் கலந்தாயே அன்பே...",
-      "Dancing in the shadows of the starlight...",
-      "விண்மீன்கள் போல் நாம் இணைந்திருப்போம்...",
-      "Through the highs and lows, we shine...",
-      "ஆசைகள் நெஞ்சில் அலைபாயும் நேரம்...",
-      "Let the rhythm guide us home tonight...",
-      "உயிரே உன் வாசம் என்னை ஈர்க்குதே...",
-      "Under the moon, our souls unite...",
-      "கனவுகள் யாவும் நிஜமாகும் காலம்...",
-      "Every moment with you is a dream..."
-    ];
-  }
-
-  const lyrics = [
-    { time: 0, text: `🎵 Playing: ${cleanTitle} 🎵` },
-    { time: 5, text: `👤 Artist: ${artist}` },
-    { time: 8, text: "🌸 (Instrumental Intro) 🌸" }
+  return [
+    { time: 0, text: `🎵 ${cleanTitle}` },
+    { time: 3, text: `👤 ${artist}` },
+    { time: 6, text: `(Searching for synced lyrics...)` },
+    { time: 10, text: `(If no lyrics appear, they are unavailable for this track)` }
   ];
-
-  // Loop and generate lyrics up to 500 seconds dynamically
-  let currentTime = 15;
-  let lineIndex = 0;
-  
-  const chorus = isSad 
-    ? ["துரோகம் தாங்காமல் துடிக்குதே நெஞ்சம்...", "ஏன் என்னை பிரிந்தாய் என் உயிரே..."]
-    : isHappy 
-      ? ["கொண்டாட்டம் போடுவோம் குதுகலமாய்...", "வாழ்கை கொண்டாடும் தருணமே இது..."]
-      : ["என் அன்பே என் உயிரே நீதானே...", "உன்னோடு வாழும் நொடியே போதுமே..."];
-
-  while (currentTime < 500) {
-    // Add a Verse line
-    lyrics.push({
-      time: currentTime,
-      text: lyricTemplate[lineIndex % lyricTemplate.length]
-    });
-    currentTime += 8;
-    
-    // Add second Verse line
-    lyrics.push({
-      time: currentTime,
-      text: lyricTemplate[(lineIndex + 1) % lyricTemplate.length]
-    });
-    currentTime += 8;
-
-    // Add Chorus
-    lyrics.push({
-      time: currentTime,
-      text: `✨ ${chorus[0]} ✨`
-    });
-    currentTime += 8;
-    lyrics.push({
-      time: currentTime,
-      text: `✨ ${chorus[1]} ✨`
-    });
-    currentTime += 8;
-
-    // Add brief Instrumental break every now and then
-    if (currentTime % 3 === 0) {
-      lyrics.push({
-        time: currentTime,
-        text: "🎶 (Instrumental Bridge) 🎶"
-      });
-      currentTime += 12;
-    }
-    
-    lineIndex += 2;
-  }
-  
-  lyrics.push({
-    time: currentTime,
-    text: "💖 (Outro) 💖"
-  });
-
-  return lyrics;
 };
 
 const parseLRC = (lrcText) => {
@@ -541,24 +434,27 @@ export function AudioProvider({ children }) {
       const cacheKey = `/api/stream?id=${trackId}`;
       let audioSrc = (typeof navigator !== "undefined" && navigator.onLine) ? cacheKey : null;
 
+      // SYNCHRONOUS SETUP: Start playback immediately without waiting for async operations
+      // This preserves the critical user gesture context for strict mobile browser policies.
+      if (audioRef.current) {
+        if (audioSrc) {
+          audioRef.current.src = audioSrc;
+          audioRef.current.currentTime = 0;
+          if (shouldAutoPlay) {
+            audioRef.current.play().catch(err => {
+              console.warn('HTML audio play failed synchronously:', err);
+              setIsBuffering(false);
+              setIsPlaying(false);
+            });
+          } else {
+            setIsBuffering(false);
+          }
+        }
+      }
+
       (async () => {
         try {
           if (audioRef.current) {
-            // Fast track playback if online
-            if (audioSrc) {
-              audioRef.current.src = audioSrc;
-              audioRef.current.currentTime = 0;
-              if (shouldAutoPlay) {
-                audioRef.current.play().catch(err => {
-                  console.warn('HTML audio play failed:', err);
-                  setIsBuffering(false);
-                  setIsPlaying(false);
-                });
-              } else {
-                setIsBuffering(false);
-              }
-            }
-
             // Background cache check
             try {
               if (typeof window !== "undefined" && "caches" in window) {
@@ -567,10 +463,10 @@ export function AudioProvider({ children }) {
                 if (matchedResponse) {
                   if (!audioSrc) { // We are offline, use cache
                     const blob = await matchedResponse.blob();
-                    audioSrc = URL.createObjectURL(blob);
+                    const offlineSrc = URL.createObjectURL(blob);
                     console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
                     if (audioRef.current && currentTrackRef.current?.id === track.id) {
-                      audioRef.current.src = audioSrc;
+                      audioRef.current.src = offlineSrc;
                       audioRef.current.currentTime = 0;
                       if (shouldAutoPlay) {
                         audioRef.current.play().catch(e => console.warn(e));

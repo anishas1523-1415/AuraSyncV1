@@ -2,7 +2,7 @@
 import styles from "./page.module.css";
 import { useUser, useClerk } from "@/lib/clerk";
 import { useAudio } from "@/contexts/AudioContext";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ChartBar, SignOut, MusicNote, Clock, Heart,
   Gear, Bell, Shield, CaretRight, Play, DownloadSimple, X, Export, Trash, Pause
@@ -13,6 +13,9 @@ export default function Profile() {
   const { signOut } = useClerk();
   const { playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile } = useAudio();
   const [downloadedSongs, setDownloadedSongs] = useState([]);
+
+  // Memoize taste profile to avoid expensive recalculation on every render
+  const tasteProfile = useMemo(() => getUserTasteProfile(), [playHistory, getUserTasteProfile]);
 
   useEffect(() => {
     const loadDownloads = () => {
@@ -160,20 +163,20 @@ export default function Profile() {
           <h2>Your Sound Aura</h2>
           <p>
             {playHistory.length > 0
-              ? `Your aura is a neon blend of ${getUserTasteProfile().topGenre} and ${getUserTasteProfile().dominantMood} vibes. You vibe heavily with ${getUserTasteProfile().topArtist}.`
+              ? `Your aura is a neon blend of ${tasteProfile.topGenre} and ${tasteProfile.dominantMood} vibes. You vibe heavily with ${tasteProfile.topArtist}.`
               : "Start playing songs to build your aura"}
           </p>
         </div>
       </div>
 
       {/* Taste Breakdown Details */}
-      {playHistory.length > 0 && getUserTasteProfile().stats && (
+      {playHistory.length > 0 && tasteProfile.stats && (
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Aura Breakdown</h2>
           <div className={styles.breakdownCard}>
             <div className={styles.breakdownGroup}>
               <h3>Top Genres</h3>
-              {getUserTasteProfile().stats.genres.map(g => (
+              {tasteProfile.stats.genres.map(g => (
                 <div key={g.name} className={styles.statProgressRow}>
                   <div className={styles.progressLabel}>
                     <span>{g.name}</span>
@@ -191,7 +194,7 @@ export default function Profile() {
 
             <div className={styles.breakdownGroup}>
               <h3>Mood Vibes</h3>
-              {getUserTasteProfile().stats.moods.map(m => (
+              {tasteProfile.stats.moods.map(m => (
                 <div key={m.name} className={styles.statProgressRow}>
                   <div className={styles.progressLabel}>
                     <span>{m.name}</span>
