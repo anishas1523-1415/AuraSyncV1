@@ -3,14 +3,6 @@ import { Innertube, UniversalCache } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-
-  if (!id) {
-    return NextResponse.json({ error: 'Missing track ID' }, { status: 400 });
-  }
-
 // Hot global caching to eliminate setup delays and YouTube rate limits.
 // These variables persist in memory across serverless invocations on Vercel.
 let ytInstance = null;
