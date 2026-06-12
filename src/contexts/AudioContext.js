@@ -882,6 +882,7 @@ export function AudioProvider({ children }) {
           onPlay={() => {
             setIsPlaying(true);
             setIsBuffering(false);
+            window._auraConsecutiveErrors = 0;
           }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => {
@@ -900,8 +901,25 @@ export function AudioProvider({ children }) {
             console.warn("Audio element error:", e);
             setIsBuffering(false);
             setIsPlaying(false);
-            if (typeof window !== "undefined" && navigator.onLine) {
-              alert("Failed to play: Audio stream extraction failed or was blocked by host provider.");
+            
+            // Prevent infinite skip loops during global YouTube decipher outages
+            window._auraConsecutiveErrors = (window._auraConsecutiveErrors || 0) + 1;
+            
+            if (window._auraConsecutiveErrors > 3) {
+              console.error("Multiple stream failures detected. YouTube proxy APIs are likely down.");
+              if (typeof window !== "undefined" && navigator.onLine) {
+                // Show one non-blocking message if possible, or gracefully stop
+                const msg = document.createElement("div");
+                msg.textContent = "YouTube streaming is currently disrupted globally. Playback unavailable.";
+                msg.style.cssText = "position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(255,0,0,0.8);color:white;padding:12px 24px;border-radius:20px;z-index:99999;font-size:14px;box-shadow:0 10px 20px rgba(0,0,0,0.5);";
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 4000);
+              }
+              // Reset and stop
+              window._auraConsecutiveErrors = 0;
+            } else {
+              // Try the next track
+              playNext(true);
             }
           }}
         />
