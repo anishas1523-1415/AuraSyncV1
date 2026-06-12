@@ -10,7 +10,8 @@ async function getInnertubeInstance() {
   if (!ytInstance) {
     ytInstance = await Innertube.create({
       cache: new UniversalCache(false),
-      generate_session_locally: true
+      generate_session_locally: true,
+      clientType: 'IOS'
     });
   }
   return ytInstance;
@@ -26,48 +27,28 @@ export async function GET(request) {
 
   try {
     const yt = await getInnertubeInstance();
-    const info = await yt.getInfo(id);
     
-    // Choose the best audio-only format (usually m4a/mp4)
-    const format = info.chooseFormat({ type: 'audio', quality: 'best' });
-    
-    if (!format || !format.url) {
-      throw new Error("No suitable audio format found");
-    }
-    
-    // Decipher the URL if necessary
-    const streamUrl = format.decipher(yt.session.player);
-
-    // Fetch the audio stream directly from Vercel
-    // This solves the 403 IP mismatch issue because Vercel's IP requests the URL
-    // and Vercel's IP downloads the bytes, matching the IP lock perfectly.
-    const response = await fetch(streamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
+    // Download directly using the IOS client which currently bypasses the broken decipher signature!
+    const stream = await yt.download(id, {
+      type: 'audio',
+      quality: 'best',
+      client: 'IOS'
     });
 
-    if (!response.ok) {
-      throw new Error(`YouTube stream returned status ${response.status}`);
-    }
-
-    // Pipe the response directly back to the client
     const headers = new Headers();
-    headers.set('Content-Type', format.mime_type || 'audio/mp4');
+    headers.set('Content-Type', 'audio/mp4');
     headers.set('Accept-Ranges', 'bytes');
-    if (response.headers.has('Content-Length')) {
-      headers.set('Content-Length', response.headers.get('Content-Length'));
-    }
+    headers.set('Cache-Control', 'public, max-age=86400'); // Cache on Vercel Edge for 24 hours to reduce latency!
 
-    return new NextResponse(response.body, {
+    return new NextResponse(stream, {
       status: 200,
       headers
     });
 
   } catch (e) {
-    console.error('[AuraSynq Stream Error]: Failed to pipe stream via Vercel.', e.message);
+    console.error('[AuraSynq Stream Error]: Failed to download via IOS client.', e.message);
     
-    // Fallback to proxy APIs if all else fails
+    // Final desperate fallback if even the IOS client fails
     const fallbackUrl = `https://pipedapi.kavin.rocks/streams/${id}`;
     try {
       const pipedRes = await fetch(fallbackUrl);
