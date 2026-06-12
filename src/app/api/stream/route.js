@@ -2,16 +2,28 @@ import { NextResponse } from 'next/server';
 import { Innertube, UniversalCache } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 // Hot global caching for the Innertube instance
 let ytInstance = null;
 
 async function getInnertubeInstance() {
   if (!ytInstance) {
+    const myCustomFetch = async (url, options) => {
+      // Only proxy the API requests to bypass Vercel IP ban.
+      // This routes the player request through corsproxy.io to avoid "Sign in to confirm you're not a bot"
+      if (typeof url === 'string' && url.includes('youtubei/v1/player')) {
+        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+        return fetch(proxyUrl, options);
+      }
+      return fetch(url, options);
+    };
+
     ytInstance = await Innertube.create({
       cache: new UniversalCache(false),
       generate_session_locally: true,
-      clientType: 'IOS'
+      clientType: 'IOS',
+      fetch: myCustomFetch
     });
   }
   return ytInstance;
