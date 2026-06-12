@@ -280,6 +280,23 @@ export default function Player() {
               style={{ x, rotate }}
               onTap={handleTap}
             >
+              {/* Share (Top Left) and Like (Top Right) absolute buttons inside card */}
+              <button 
+                className={`${styles.cardActionBtn} ${styles.cardShareBtn}`} 
+                onClick={handleShareClick}
+                title="Share Song"
+              >
+                <Share size={22} />
+              </button>
+
+              <button 
+                className={`${styles.cardActionBtn} ${styles.cardLikeBtn} ${isLiked ? styles.liked : ""}`}
+                onClick={handleLikeClick}
+                title={isLiked ? "Unlike Song" : "Like Song"}
+              >
+                <Heart size={24} weight={isLiked ? "fill" : "regular"} />
+              </button>
+
               {/* Tinder-style SKIP and PREV visual stamp overlays */}
               <motion.div className={styles.skipBadge} style={{ opacity: skipOpacity }}>
                 <span>SKIP</span>
@@ -306,27 +323,9 @@ export default function Player() {
                 )}
               </div>
               
-              <div className={styles.infoRow} onClick={(e) => e.stopPropagation()}>
-                <div className={styles.info}>
-                  <h1>{currentTrack.title?.split("|")[0].split("(")[0].trim()}</h1>
-                  <p>{currentTrack.artist}</p>
-                </div>
-                <div className={styles.songActions}>
-                  <button 
-                    className={`${styles.songActionBtn} ${isLiked ? styles.liked : ""}`}
-                    onClick={handleLikeClick}
-                    title={isLiked ? "Unlike Song" : "Like Song"}
-                  >
-                    <Heart size={26} weight={isLiked ? "fill" : "regular"} />
-                  </button>
-                  <button 
-                    className={styles.songActionBtn} 
-                    onClick={handleShareClick}
-                    title="Share Song"
-                  >
-                    <Share size={24} />
-                  </button>
-                </div>
+              <div className={styles.info} onClick={(e) => e.stopPropagation()}>
+                <h1>{currentTrack.title?.split("|")[0].split("(")[0].trim()}</h1>
+                <p>{currentTrack.artist}</p>
               </div>
 
               {/* Seek Slider */}
@@ -354,19 +353,8 @@ export default function Player() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Tinder Action Buttons */}
+          {/* Centered Media Controls */}
           <div className={styles.tinderActions}>
-            <button 
-              className={`${styles.actionBtnShuffle} ${isShuffle ? styles.activeShuffle : ""}`} 
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleShuffle();
-              }}
-              title="Shuffle Queue"
-            >
-              <Shuffle size={20} weight={isShuffle ? "bold" : "regular"} />
-            </button>
-
             <button 
               className={styles.actionBtnPrev} 
               onClick={handleBtnPrev}

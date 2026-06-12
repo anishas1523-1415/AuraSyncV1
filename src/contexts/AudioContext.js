@@ -976,7 +976,7 @@ export function AudioProvider({ children }) {
           onEnded={() => {
             setIsPlaying(false);
             setProgress(0);
-            playNext();
+            playNext(true);
           }}
           onTimeUpdate={(e) => {
             const a = e.target;
