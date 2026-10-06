@@ -10,6 +10,13 @@ const RATE_LIMIT_PER_MINUTE = 30;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const SOURCE_TIMEOUT_MS = 6000;
 
+// Upstash's client retries 5 times with backoff by default (~4s per call). When the database is
+// unreachable that added ~13s to every search, so fail fast and skip it for a while instead.
+const UPSTASH_TIMEOUT_MS = 1500;
+const UPSTASH_COOLDOWN_MS = 5 * 60 * 1000;
+const SUPABASE_TIMEOUT_MS = 1500;
+let upstashDownUntil = 0;
+
 const INVIDIOUS_INSTANCES = [
   "https://vid.puffyan.us",
   "https://invidious.jing.rocks",
@@ -27,6 +34,8 @@ if (useUpstash) {
     redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      retry: false,
+      signal: () => AbortSignal.timeout(UPSTASH_TIMEOUT_MS),
     });
 
     ratelimit = new Ratelimit({
@@ -55,6 +64,13 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+const upstashAvailable = () => useUpstash && !!redis && Date.now() > upstashDownUntil;
+
+function markUpstashDown(operation, err) {
+  upstashDownUntil = Date.now() + UPSTASH_COOLDOWN_MS;
+  console.warn(`Upstash ${operation} failed (${err.message}); using in-memory cache and rate limits for 5 min`);
+}
+
 // x-forwarded-for is "client, proxy1, proxy2"; only the first entry identifies the user
 const getClientIp = (request) =>
   request.headers.get('x-forwarded-for')?.split(',')[0].trim() || request.headers.get('x-real-ip') || 'unknown';
@@ -73,13 +89,13 @@ function isRateLimitedInMemory(ip, now) {
 }
 
 async function getCachedTracks(cacheKey, queryClean, now) {
-  if (useUpstash && redis) {
+  if (upstashAvailable()) {
     try {
       const cached = await redis.get(cacheKey);
       if (cached) return typeof cached === 'string' ? JSON.parse(cached) : cached;
       return null;
     } catch (err) {
-      console.warn('Upstash Cache get failed, falling back to in-memory:', err.message);
+      markUpstashDown('cache get', err);
     }
   }
   const cachedData = searchCache.get(queryClean);
@@ -147,7 +163,7 @@ export async function GET(request) {
   }
 
   // 2. Rate Limiting
-  if (useUpstash && ratelimit) {
+  if (upstashAvailable() && ratelimit) {
     try {
       const { success, limit, reset, remaining } = await ratelimit.limit(ip);
       if (!success) {
@@ -164,7 +180,7 @@ export async function GET(request) {
         );
       }
     } catch (err) {
-      console.warn('Upstash Rate Limiting failed, falling back to in-memory:', err.message);
+      markUpstashDown('rate limit', err);
       if (isRateLimitedInMemory(ip, now)) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
       }
@@ -199,17 +215,20 @@ export async function GET(request) {
         cover: t.cover,
         url: t.url,
       }));
-      const { error } = await supabase.from('song_cache').upsert(upsertData, { onConflict: 'id' });
+      const { error } = await supabase
+        .from('song_cache')
+        .upsert(upsertData, { onConflict: 'id' })
+        .abortSignal(AbortSignal.timeout(SUPABASE_TIMEOUT_MS));
       if (error) console.warn("Supabase song_cache upsert failed:", error.message);
     }
 
     // 3. Save to Query Cache
-    if (useUpstash && redis) {
+    if (upstashAvailable()) {
       try {
         // Cache for 24 hours (86400 seconds)
         await redis.set(cacheKey, candidateTracks, { ex: 24 * 60 * 60 });
       } catch (err) {
-        console.warn('Upstash Cache set failed, falling back to in-memory:', err.message);
+        markUpstashDown('cache set', err);
         searchCache.set(queryClean, { tracks: candidateTracks, timestamp: now });
       }
     } else {
