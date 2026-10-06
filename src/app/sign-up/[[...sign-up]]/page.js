@@ -11,6 +11,13 @@ export default function SignUpPage() {
       padding: "1rem"
     }}>
       <div style={{ textAlign: "center" }}>
+        <img
+          src="/logo-emblem.png"
+          alt=""
+          width={112}
+          height={91}
+          style={{ display: "block", margin: "0 auto 0.5rem", filter: "drop-shadow(0 0 18px rgba(168, 85, 247, 0.35))" }}
+        />
         <h1 style={{
           fontSize: "2rem",
           fontWeight: 800,

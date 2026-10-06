@@ -18,5 +18,7 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- Android 12+ system splash: app background instead of the default white -->
+        <item name="windowSplashScreenBackground">#090D18</item>
     </style>
 </resources>
