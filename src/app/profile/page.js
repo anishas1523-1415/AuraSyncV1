@@ -7,11 +7,12 @@ import {
   ChartBar, SignOut, MusicNote, Clock, Heart,
   Gear, Bell, Shield, CaretRight, Play, DownloadSimple, X, Export, Trash, Pause
 } from "@phosphor-icons/react";
+import { toast } from "@/lib/toast";
 
 export default function Profile() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
-  const { playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile } = useAudio();
+  const { playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile, listenStats } = useAudio();
   const [downloadedSongs, setDownloadedSongs] = useState([]);
 
   // Memoize taste profile to avoid expensive recalculation on every render
@@ -42,7 +43,7 @@ export default function Profile() {
       if (success) {
         setDownloadedSongs(prev => prev.filter(t => t.id !== trackId));
         if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(15);
-        alert("Downloaded track removed offline!");
+        toast("Removed from offline downloads");
       }
     }
   };
@@ -104,7 +105,9 @@ export default function Profile() {
     ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "";
 
-  const totalMinutes = playHistory.length * 4; // avg 4 min per track
+  // Real listening time and lifetime plays (history only keeps the latest 50 songs)
+  const totalMinutes = Math.round((listenStats?.totalSeconds || 0) / 60);
+  const songsPlayed = Math.max(listenStats?.trackPlays || 0, playHistory.length);
   const uniqueArtists = [...new Set(playHistory.map(t => t.artist))].length;
 
   const handleSignOut = () => signOut({ redirectUrl: "/" });
@@ -143,7 +146,7 @@ export default function Profile() {
         </div>
         <div className={styles.statCard}>
           <MusicNote size={22} color="#ec4899" />
-          <h3>{playHistory.length}</h3>
+          <h3>{songsPlayed}</h3>
           <p>Songs Played</p>
         </div>
         <div className={styles.statCard}>
@@ -253,7 +256,7 @@ export default function Profile() {
         {downloadedSongs.length === 0 ? (
           <div className={styles.emptyDownloads}>
             <p>No offline tracks downloaded yet.</p>
-            <p className={styles.emptySub}>Tap the download arrow in the floating dial on any playlist or player page to cache music offline!</p>
+            <p className={styles.emptySub}>Open a playlist in your Library and tap Sync to save its songs for offline listening!</p>
           </div>
         ) : (
           <div className={styles.downloadsList}>

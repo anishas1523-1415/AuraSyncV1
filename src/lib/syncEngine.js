@@ -14,6 +14,12 @@ class SyncEngine {
     
     // Throttle broadcast
     this.lastBroadcastTime = 0;
+    // What the host is playing; progress events alone don't carry it
+    this.nowPlaying = { trackId: null, isPlaying: false };
+  }
+
+  updateNowPlaying({ trackId = null, isPlaying = false } = {}) {
+    this.nowPlaying = { trackId, isPlaying };
   }
 
   joinRoom(roomId, userId, isHost = false) {
@@ -62,15 +68,16 @@ class SyncEngine {
     }
   }
 
-  broadcastState(progress, isPlaying = true, currentTrackId = null) {
+  broadcastState(progress, isPlaying = this.nowPlaying.isPlaying, currentTrackId = this.nowPlaying.trackId) {
     if (!this.isHost || !this.roomId) return;
-    
+
     const now = Date.now();
     // Throttle to 1 broadcast per second to save bandwidth
     if (now - this.lastBroadcastTime < 1000) return;
     this.lastBroadcastTime = now;
 
     if (isSupabaseActive) {
+      // Supabase query builders are thenables without .catch(); errors arrive in `error`
       supabase.from('societies_rooms').upsert({
         id: this.roomId,
         name: this.roomId,
@@ -78,7 +85,9 @@ class SyncEngine {
         current_track_id: currentTrackId,
         progress_seconds: progress,
         is_playing: isPlaying
-      }).catch(console.error);
+      }).then(({ error }) => {
+        if (error) console.error("AuraSynq Sync: broadcast failed", error);
+      });
     } else if (isFirebaseActive) {
       const roomRef = ref(rtdb, `society_rooms/${this.roomId}`);
       set(roomRef, {

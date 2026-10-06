@@ -1,8 +1,9 @@
 "use client";
 import { useAuth } from "@/lib/clerk";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
+import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
 import AuraDial from "./AuraDial";
 
@@ -11,33 +12,34 @@ export default function AppShell() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { stopAudio, sharedTrackInfo, setSharedTrackInfo, clearSharedTrack } = useAudio();
+  const { currentTrack, stopAudio, sharedTrackInfo, openSharedTrack, playSharedTrack, clearSharedTrack } = useAudio();
+  const wasSignedInRef = useRef(isSignedIn);
 
   const isAuthPage =
     pathname?.startsWith("/sign-in") || pathname?.startsWith("/sign-up");
   const isPlayerPage = pathname === "/player";
 
-  // Check for shared track links and create a banner
+  // Shared links (?track=<id>&t=<title>&a=<artist>) show a banner; tapping it plays the song
   useEffect(() => {
     const trackId = searchParams?.get("track");
     const playlistId = searchParams?.get("playlist");
-    
-    if (trackId && typeof window !== "undefined") {
-      setSharedTrackInfo({
+
+    if (trackId) {
+      openSharedTrack({
         id: trackId,
-        title: "Shared Song",
-        artist: "Someone shared a vibe with you",
-        cover: "/icon-512x512.png"
+        title: searchParams.get("t") || undefined,
+        artist: searchParams.get("a") || undefined
       });
       router.replace(pathname, { scroll: false });
     }
-    
-    if (playlistId && typeof window !== "undefined") {
-      alert(`You have successfully joined the collaborative playlist!`);
+
+    if (playlistId) {
+      toast("You have successfully joined the collaborative playlist!", { variant: "success" });
       // Since it's local state, we just redirect to library
       router.push('/library');
     }
-  }, [searchParams, pathname, router, setSharedTrackInfo]);
+    // openSharedTrack is recreated each render; reacting to URL changes is what matters here
+  }, [searchParams, pathname, router]);
 
   // Capture PWA install prompt
   useEffect(() => {
@@ -79,36 +81,47 @@ export default function AppShell() {
     }
   }, []);
 
-  // Stop music when user signs out
+  // Stop music only on the transition to signed-out. stopAudio is a new function every render,
+  // so depending on it re-ran this on every render and looped while signed out.
   useEffect(() => {
-    if (isSignedIn === false) {
+    if (wasSignedInRef.current && isSignedIn === false) {
       stopAudio();
     }
-  }, [isSignedIn, stopAudio]);
+    wasSignedInRef.current = isSignedIn;
+  }, [isSignedIn]);
 
   if (isAuthPage) return null;
+
+  // On the player page the banner is only needed while nothing is playing (e.g. opening a shared link)
+  const showSharedBanner = sharedTrackInfo && !(isPlayerPage && currentTrack);
 
   return (
     <>
       <MiniPlayer />
       <AuraDial />
-      
-      {sharedTrackInfo && !isPlayerPage && (
-        <div className="shared-song-banner" onClick={() => { router.push("/player"); }}>
+
+      {showSharedBanner && (
+        <div
+          className="shared-song-banner"
+          onClick={() => {
+            playSharedTrack();
+            if (!isPlayerPage) router.push("/player");
+          }}
+        >
           <div className="banner-content">
             <img src={sharedTrackInfo.cover} alt="" className="banner-cover" />
             <div className="banner-info">
-              <span className="banner-tag">🎵 SHARED SONG</span>
+              <span className="banner-tag">🎵 SHARED SONG · TAP TO PLAY</span>
               <h4>{sharedTrackInfo.title?.split("|")[0].split("(")[0].trim()}</h4>
               <p>{sharedTrackInfo.artist}</p>
             </div>
           </div>
           <div className="banner-actions">
-            <button 
-              className="banner-close" 
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                clearSharedTrack(); 
+            <button
+              className="banner-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                clearSharedTrack();
               }}
               title="Dismiss"
             >

@@ -1,8 +1,9 @@
 "use client";
 import styles from "./page.module.css";
 import { useAudio } from "@/contexts/AudioContext";
-import { Heart, Share, Play, Pause, MusicNote, DotsThreeVertical } from "@phosphor-icons/react";
+import { Heart, Share, Play, Pause } from "@phosphor-icons/react";
 import { useEffect, useState, useRef } from "react";
+import { shareOrCopy } from "@/lib/toast";
 
 const getFavoriteArtist = () => {
   try {
@@ -31,7 +32,7 @@ const getFavoriteArtist = () => {
 };
 
 const QUERIES = [
-  "trending pop songs 2024",
+  `trending pop songs ${new Date().getFullYear()}`,
   "latest electronic dance music",
   "viral songs this week",
   "chill indie hits",
@@ -39,10 +40,9 @@ const QUERIES = [
 ];
 
 export default function Discover() {
-  const { playTrack, currentTrack, isPlaying, togglePlay } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, toggleLikeTrack, isTrackLiked } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [liked, setLiked] = useState({});
   const loadedRef = useRef(false);
 
   useEffect(() => {
@@ -68,30 +68,21 @@ export default function Discover() {
       }
     }
     fetchTracks();
-
-    // Load saved likes
-    try {
-      const saved = localStorage.getItem("aurasynq_liked");
-      if (saved) setLiked(JSON.parse(saved));
-    } catch (e) {}
   }, []);
 
-  const toggleLike = (trackId) => {
-    setLiked((prev) => {
-      const updated = { ...prev, [trackId]: !prev[trackId] };
-      try { localStorage.setItem("aurasynq_liked", JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+  // Likes go to the shared library so they show up in Library → Liked Songs and sync to the cloud
+  const toggleLike = (track) => {
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+    toggleLikeTrack(track);
   };
 
   const handleShare = (track) => {
-    if (navigator.share) {
-      navigator.share({
-        title: track.title,
-        text: `🎵 Listen to ${track.title} by ${track.artist} on AuraSynq!`,
-        url: window.location.href,
-      }).catch(() => {});
-    }
+    const title = track.title?.split("|")[0].split("(")[0].trim() || "";
+    shareOrCopy({
+      title: track.title,
+      text: `🎵 Listen to ${title} by ${track.artist} on AuraSynq!`,
+      url: `${window.location.origin}/player?track=${encodeURIComponent(track.id)}&t=${encodeURIComponent(title)}&a=${encodeURIComponent(track.artist || "")}`,
+    }, "Song link copied to clipboard!");
   };
 
   if (loading) {
@@ -107,7 +98,7 @@ export default function Discover() {
     <div className={styles.feedContainer}>
       {tracks.map((track) => {
         const isActive = currentTrack?.id === track.id;
-        const isLiked = liked[track.id];
+        const isLiked = isTrackLiked(track.id);
 
         return (
           <div
@@ -149,7 +140,7 @@ export default function Discover() {
             <div className={styles.actions}>
               <button
                 className={`${styles.actionBtn} ${isLiked ? styles.liked : ""}`}
-                onClick={() => toggleLike(track.id)}
+                onClick={() => toggleLike(track)}
               >
                 <Heart size={30} weight={isLiked ? "fill" : "regular"} />
                 <span>{isLiked ? "Liked" : "Like"}</span>

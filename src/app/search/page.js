@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
+import { toast } from "@/lib/toast";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 
@@ -29,6 +30,7 @@ export default function Search() {
   const [recentSearches, setRecentSearches] = useState([]);
   const inputRef = useRef(null);
   const lastSearchedRef = useRef("");
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -56,27 +58,41 @@ export default function Search() {
     });
   };
 
-  const doSearch = async (searchQuery) => {
-    const q = (searchQuery || query).trim();
-    if (!q) return;
+  // Shared by typing and Enter; only the newest request may update results (typing fast used
+  // to let a slow, older response overwrite the latest one)
+  const runSearch = async (q) => {
+    const requestId = ++requestIdRef.current;
     lastSearchedRef.current = q;
     setLoading(true);
-    saveRecent(q);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      if (requestId !== requestIdRef.current) return;
+      if (res.status === 429) {
+        toast("Searching too fast — take a breath and try again", { variant: "error" });
+        return;
+      }
       const data = await res.json();
-      if (data.tracks) setResults(data.tracks);
+      if (requestId === requestIdRef.current && data.tracks) setResults(data.tracks);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
+  };
+
+  const doSearch = (searchQuery) => {
+    const q = (searchQuery || query).trim();
+    if (!q) return;
+    saveRecent(q);
+    runSearch(q);
   };
 
   // Debounced typing search
   useEffect(() => {
     const trimmed = query.trim();
     if (!trimmed) {
+      requestIdRef.current++;
+      lastSearchedRef.current = "";
       setResults([]);
       setLoading(false);
       return;
@@ -86,20 +102,7 @@ export default function Search() {
       return;
     }
 
-    const timer = setTimeout(async () => {
-      lastSearchedRef.current = trimmed;
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
-        const data = await res.json();
-        if (data.tracks) setResults(data.tracks);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }, 350);
-
+    const timer = setTimeout(() => runSearch(trimmed), 350);
     return () => clearTimeout(timer);
   }, [query]);
 

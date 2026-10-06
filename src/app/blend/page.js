@@ -6,6 +6,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } from "@phosphor-icons/react";
 import Link from "next/link";
 import { supabase, isSupabaseActive } from "@/lib/supabase";
+import { shareOrCopy } from "@/lib/toast";
 
 const FRIEND_PROFILES = [
   {
@@ -138,28 +139,21 @@ export default function Blend() {
     }
     
     if (isSupabaseActive && user?.id) {
-      try {
-        await supabase.from('blend_sessions').insert({
-          id: sessionUuid,
-          creator_id: user.id,
-          creator_genres: myGenres,
-        });
-      } catch (err) {
-        console.warn("Failed to create blend session in Supabase:", err);
-      }
+      // Supabase reports failures in `error` instead of throwing
+      const { error } = await supabase.from('blend_sessions').insert({
+        id: sessionUuid,
+        creator_id: user.id,
+        creator_genres: myGenres,
+      });
+      if (error) console.warn("Failed to create blend session in Supabase:", error);
     }
 
     const inviteUrl = `${window.location.origin}/blend?invite=${sessionUuid}`;
-    if (navigator.share) {
-      navigator.share({
-        title: "Aura Blend on AuraSynq",
-        text: `Vibe Check! Blend your music taste with mine on AuraSynq!`,
-        url: inviteUrl
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(inviteUrl);
-      alert("Blend invite link copied to clipboard!");
-    }
+    shareOrCopy({
+      title: "Aura Blend on AuraSynq",
+      text: `Vibe Check! Blend your music taste with mine on AuraSynq!`,
+      url: inviteUrl
+    }, "Blend invite link copied to clipboard!");
   };
 
   const startBlend = async () => {

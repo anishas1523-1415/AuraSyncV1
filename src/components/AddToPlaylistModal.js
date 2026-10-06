@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { X, Plus, MusicNote } from "@phosphor-icons/react";
 import styles from "./AddToPlaylistModal.module.css";
+import { toast } from "@/lib/toast";
 
 export default function AddToPlaylistModal({ track, onClose }) {
   const { customPlaylists, createPlaylist, addTrackToPlaylist } = useAudio();
@@ -22,7 +23,7 @@ export default function AddToPlaylistModal({ track, onClose }) {
     }
     setNewPlaylistName("");
     setShowCreateForm(false);
-    alert(`Created playlist "${name}" and added "${track.title}"!`);
+    toast(`Created "${name}" and added "${track.title?.split("|")[0].split("(")[0].trim()}"`, { variant: "success" });
     onClose();
   };
 
@@ -31,7 +32,7 @@ export default function AddToPlaylistModal({ track, onClose }) {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(15);
     }
-    alert(`Added "${track.title}" to playlist "${playlistName}"!`);
+    toast(`Added "${track.title?.split("|")[0].split("(")[0].trim()}" to "${playlistName}"`, { variant: "success" });
     onClose();
   };
 

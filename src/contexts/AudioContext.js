@@ -1,16 +1,121 @@
 "use client";
-import { createContext, useContext, useState, useRef, useEffect } from "react";
+import { createContext, useContext, useState, useRef, useEffect, useCallback } from "react";
 import { useUser } from "@/lib/clerk";
-import { syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud } from "@/lib/dbSync";
-let MediaSession = null;
-if (typeof window !== "undefined") {
-  import("@capgo/capacitor-media-session").then((m) => {
-    MediaSession = m.MediaSession;
-  }).catch(err => console.warn("Failed to load Capgo MediaSession plugin", err));
-}
+import {
+  syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud, syncProfileToCloud, loadLibraryFromCloud
+} from "@/lib/dbSync";
+import { toast } from "@/lib/toast";
+
+// Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
+// On the web it wraps navigator.mediaSession, so one adapter covers both.
+// The plugin is a Proxy that answers every property (even `then`), so it must be wrapped in an
+// object: resolving a promise with it directly calls a non-existent native `then()` method.
+const mediaSessionPluginPromise = typeof window !== "undefined"
+  ? import("@capgo/capacitor-media-session").then((m) => ({ plugin: m.MediaSession })).catch(() => ({ plugin: null }))
+  : Promise.resolve({ plugin: null });
+
+const webMediaSession = {
+  setMetadata: async (options) => { navigator.mediaSession.metadata = new MediaMetadata(options); },
+  setPlaybackState: async ({ playbackState }) => { navigator.mediaSession.playbackState = playbackState; },
+  setActionHandler: async ({ action }, handler) => { navigator.mediaSession.setActionHandler(action, handler); },
+  setPositionState: async (options) => { navigator.mediaSession.setPositionState(options); }
+};
+
+const withMediaSession = (fn) => {
+  mediaSessionPluginPromise
+    .then(({ plugin }) => {
+      if (plugin) return fn(plugin);
+      if ("mediaSession" in navigator) return fn(webMediaSession);
+    })
+    .catch(() => {}); // Unsupported action or platform: ignore
+};
 
 const AudioContext = createContext();
 export const audioProgressEmitter = typeof window !== "undefined" ? new EventTarget() : null;
+// Last emitted values, so components mounting mid-song start with the right time
+const lastEmitted = { progress: 0, duration: 0 };
+
+const HISTORY_KEY = "aurasynq_play_history";
+const LIKED_KEY = "aurasynq_liked_songs_metadata";
+const PLAYLISTS_KEY = "aurasynq_custom_playlists";
+const DOWNLOADS_KEY = "aurasynq_downloaded_metadata";
+const AUTO_CACHE_KEY = "aurasynq_auto_cached_ids";
+const STATS_KEY = "aurasynq_listen_stats";
+const SYNC_META_KEY = "aurasynq_sync_meta";
+const AUDIO_CACHE = "aurasynq_offline_audio";
+
+const HISTORY_LIMIT = 50;
+const AUTO_CACHE_LIMIT = 25;          // recently played songs kept for offline replay
+const AUTO_CACHE_AFTER_SECONDS = 30;  // only cache songs that were actually listened to
+const RADIO_BATCH = 8;
+const DEFAULT_STATS = { totalSeconds: 0, trackPlays: 0 };
+
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+const DIRECT_AUDIO = /\.(mp3|m4a|wav|ogg|aac)($|\?)/i;
+const LONG_FORM = /(full album|greatest hits|jukebox|non ?stop|playlist|\bmix\b|mashup|compilation|\d+\s*hours?)/i;
+
+const readStored = (key, fallback = []) => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
+const writeStored = (key, value) => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+};
+
+// Strip heavy payloads before saving to LocalStorage to prevent quota limits
+const lightTrack = (track) => {
+  const light = { ...track };
+  delete light.lyrics;
+  delete light.djIntro;
+  return light;
+};
+
+const mergeById = (primary, secondary) => {
+  const seen = new Set(primary.map(t => t.id));
+  return [...primary, ...secondary.filter(t => t && !seen.has(t.id))];
+};
+
+// Newer side wins so deletions on one device stick; unknown order (legacy data) is merged
+const resolveCollection = (local, localAt, cloud, cloudAt) => {
+  if (!cloud.length) return local;
+  if (!local.length) return cloud;
+  if (cloudAt > localAt) return cloud;
+  if (localAt > cloudAt) return local;
+  return mergeById(local, cloud);
+};
+
+const extractId = (t) => {
+  if (!t) return null;
+  if (t.id && YOUTUBE_ID.test(t.id)) return t.id;
+  if (t.url) {
+    const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+    if (m1 && m1[1]) return m1[1];
+    const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+    if (m2 && m2[1]) return m2[1];
+  }
+  return t.id || null;
+};
+
+const streamKey = (id) => `/api/stream?id=${id}`;
+const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
+const cleanArtistName = (artist = "") => artist.replace(/\s*-\s*Topic$/i, "").replace(/VEVO$/i, "").trim();
+
+const shuffleAround = (list, first) => {
+  const rest = list.filter(t => t.id !== first?.id);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  return first && list.some(t => t.id === first.id) ? [first, ...rest] : rest;
+};
+
+const isSameQueue = (a, b) =>
+  a === b || (a.length === b.length && a.every((t, i) => t.id === b[i]?.id));
 
 const generateMockLyrics = (title, artist) => {
   const cleanTitle = title.split('|')[0].split('(')[0].split('-')[0].trim();
@@ -22,20 +127,18 @@ const generateMockLyrics = (title, artist) => {
   ];
 };
 
+const noLyricsFound = (title, artist) => {
+  const cleanTitle = title.split('|')[0].split('(')[0].split('-')[0].trim();
+  return [
+    { time: 0, text: `🎵 ${cleanTitle}` },
+    { time: 3, text: `👤 ${artist}` },
+    { time: 6, text: `(No synced lyrics found for this track)` }
+  ];
+};
+
 const parseLRC = (lrcText) => {
   if (!lrcText) return null;
   const lines = lrcText.split("\n");
-  const extractYoutubeId = (url) => {
-    try {
-      const urlObj = new URL(url);
-      if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
-          return urlObj.searchParams.get('v') || urlObj.pathname.split('/')[2] || urlObj.pathname.slice(1);
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  };
   const lyrics = [];
   const timeRegex = /\[(\d+):(\d+)(?:\.(\d+))?\]/;
 
@@ -45,10 +148,10 @@ const parseLRC = (lrcText) => {
       const minutes = parseInt(match[1], 10);
       const seconds = parseInt(match[2], 10);
       const milliseconds = match[3] ? parseInt(match[3].padEnd(3, "0").substring(0, 3), 10) : 0;
-      
+
       const timeInSeconds = minutes * 60 + seconds + milliseconds / 1000;
       const text = line.replace(timeRegex, "").trim();
-      
+
       if (text) {
         lyrics.push({ time: timeInSeconds, text });
       }
@@ -61,246 +164,468 @@ const parsePlainLyrics = (plainText, songDuration) => {
   if (!plainText) return null;
   const lines = plainText.split("\n").map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return null;
-  
+
   const duration = songDuration || 240;
   const interval = duration / (lines.length + 2);
-  
+
   return lines.map((text, index) => ({
     time: Math.floor((index + 1) * interval),
     text
   }));
 };
 
-const createSilenceDataURL = (duration = 600) => {
-  const sampleRate = 8000;
-  const numSamples = sampleRate * duration;
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
-  const view = new DataView(buffer);
-  
-  const writeString = (v, offset, str) => {
-    for (let i = 0; i < str.length; i++) {
-      v.setUint8(offset + i, str.charCodeAt(i));
-    }
-  };
-  
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + numSamples * 2, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, numSamples * 2, true);
-  
-  const blob = new Blob([buffer], { type: 'audio/wav' });
-  return URL.createObjectURL(blob);
-};
-
 export function AudioProvider({ children }) {
   const { user } = useUser();
   const [currentTrack, setCurrentTrack] = useState(null);
-  const [queue, setQueue] = useState([]);
+  const [queue, setQueueState] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  
+
   const progressRef = useRef(0);
   const durationRef = useRef(0);
-  
+
   const setProgress = (val) => {
     progressRef.current = val;
+    lastEmitted.progress = val;
     if (audioProgressEmitter) {
       audioProgressEmitter.dispatchEvent(new CustomEvent('progress', { detail: val }));
     }
   };
-  
+
   const setDuration = (val) => {
+    if (durationRef.current === val) return;
     durationRef.current = val;
+    lastEmitted.duration = val;
     if (audioProgressEmitter) {
       audioProgressEmitter.dispatchEvent(new CustomEvent('duration', { detail: val }));
     }
   };
-  const [silenceSrc, setSilenceSrc] = useState("");
+
   const [mounted, setMounted] = useState(false);
-  const [isYtReady, setIsYtReady] = useState(false);
-  const [playHistory, setPlayHistory] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem('aurasynq_play_history');
-        if (stored) return JSON.parse(stored);
-      } catch (e) {}
-    }
-    return [];
-  });
-  
-  const [likedTracks, setLikedTracks] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem('aurasynq_liked_songs_metadata');
-        if (stored) return JSON.parse(stored);
-      } catch (e) {}
-    }
-    return [];
-  });
-  
-  const [customPlaylists, setCustomPlaylists] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem('aurasynq_custom_playlists');
-        if (stored) return JSON.parse(stored);
-      } catch (e) {}
-    }
-    return [];
-  });
+  // Library state starts empty and is loaded after mount, so server and client renders match
+  const [libraryReady, setLibraryReady] = useState(false);
+  const [playHistory, setPlayHistory] = useState([]);
+  const [likedTracks, setLikedTracks] = useState([]);
+  const [customPlaylists, setCustomPlaylists] = useState([]);
+  const [listenStats, setListenStats] = useState(DEFAULT_STATS);
   const [isShuffle, setIsShuffle] = useState(false);
-  const [originalQueue, setOriginalQueue] = useState([]);
   const [contextPlaylist, setContextPlaylist] = useState(null);
   const [sharedTrackInfo, setSharedTrackInfo] = useState(null);
+  const [cloudUserId, setCloudUserId] = useState(null);
 
   const audioRef = useRef(null);
-  const silenceAudioRef = useRef(null);
 
-  const removeFromQueue = (trackId) => {
-    setQueue(prev => prev.filter(t => t.id !== trackId));
-    setOriginalQueue(prev => prev.filter(t => t.id !== trackId));
-  };
-
-  const addToQueue = (track) => {
-    setQueue(prev => {
-      const exists = prev.some(t => t.id === track.id);
-      if (!exists) return [...prev, track];
-      return prev;
-    });
-    setOriginalQueue(prev => {
-      const exists = prev.some(t => t.id === track.id);
-      if (!exists) return [...prev, track];
-      return prev;
-    });
-  };
-
-  const toggleShuffle = () => {
-    setIsShuffle(prev => {
-      const nextShuffle = !prev;
-      if (nextShuffle) {
-        setOriginalQueue([...queue]);
-        const currentT = currentTrackRef.current;
-        let otherTracks = queue.filter(t => t.id !== currentT?.id);
-        
-        for (let i = otherTracks.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [otherTracks[i], otherTracks[j]] = [otherTracks[j], otherTracks[i]];
-        }
-        
-        if (currentT) {
-          setQueue([currentT, ...otherTracks]);
-        } else {
-          setQueue(otherTracks);
-        }
-      } else {
-        if (originalQueue.length > 0) {
-          setQueue(originalQueue);
-        }
-      }
-      return nextShuffle;
-    });
-  };
-  const ytPlayerRef = useRef(null);
-  const pollIntervalRef = useRef(null);
-  const currentIsHtmlRef = useRef(false);
-
-  // Maintain refs to avoid stale closure scopes in YT player callbacks
+  // Refs mirror state so media-session handlers, timers and async continuations never read stale values
   const currentTrackRef = useRef(null);
   const queueRef = useRef([]);
-  const isPlayingRef = useRef(false);
+  const originalQueueRef = useRef([]);
+  const isShuffleRef = useRef(false);
+  const playHistoryRef = useRef([]);
+  const likedTracksRef = useRef([]);
+  const customPlaylistsRef = useRef([]);
 
-  useEffect(() => {
-    currentTrackRef.current = currentTrack;
-  }, [currentTrack]);
+  const blobUrlRef = useRef(null);
+  const unlockedRef = useRef(false);        // audio element has played after a user gesture (iOS)
+  const consecutiveErrorsRef = useRef(0);
+  const cachedIdsRef = useRef(new Set());   // songs available offline (downloads + auto-cache)
+  const warmedIdsRef = useRef(new Set());
+  const radioPendingRef = useRef(null);
+  const lastPushedRef = useRef({});
 
-  useEffect(() => {
-    queueRef.current = queue;
-  }, [queue]);
+  const listenStatsRef = useRef(DEFAULT_STATS);
+  const pendingListenRef = useRef(0);
+  const trackListenRef = useRef(0);
+  const lastTickRef = useRef(null);
 
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
+  useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
+  useEffect(() => { playHistoryRef.current = playHistory; }, [playHistory]);
+  useEffect(() => { likedTracksRef.current = likedTracks; }, [likedTracks]);
+  useEffect(() => { customPlaylistsRef.current = customPlaylists; }, [customPlaylists]);
+
+  const commitQueue = (nextQueue) => {
+    queueRef.current = nextQueue;
+    setQueueState(nextQueue);
+  };
+
+  const setQueue = (valueOrUpdater) => {
+    const next = typeof valueOrUpdater === "function" ? valueOrUpdater(queueRef.current) : valueOrUpdater;
+    originalQueueRef.current = next;
+    commitQueue(next);
+  };
+
+  const setCurrent = (track) => {
+    currentTrackRef.current = track;
+    setCurrentTrack(track);
+  };
+
+  // ─── Library loading & persistence ───────────────────────
 
   useEffect(() => {
     setMounted(true);
+    setPlayHistory(readStored(HISTORY_KEY));
+    setLikedTracks(readStored(LIKED_KEY));
+    setCustomPlaylists(readStored(PLAYLISTS_KEY));
+    const stats = { ...DEFAULT_STATS, ...readStored(STATS_KEY, DEFAULT_STATS) };
+    listenStatsRef.current = stats;
+    setListenStats(stats);
+    cachedIdsRef.current = new Set([
+      ...readStored(DOWNLOADS_KEY).map(t => extractId(t)),
+      ...readStored(AUTO_CACHE_KEY)
+    ]);
+    setLibraryReady(true);
   }, []);
 
-  // Update Native Capacitor Media Session
-  useEffect(() => {
-    const updateNativeSession = async () => {
-      try {
-        if (currentTrack) {
-          await MediaSession.setMetadata({
-            title: currentTrack.title,
-            artist: currentTrack.artist,
-            album: "AuraSynq",
-            artwork: [{ src: currentTrack.cover || "", sizes: "512x512", type: "image/png" }]
-          });
-          await MediaSession.setPlaybackState({
-            playbackState: isPlaying ? "playing" : "paused",
-          });
-        }
-      } catch (err) {
-        // Ignored in browser environments
-      }
-    };
-    updateNativeSession();
-  }, [currentTrack, isPlaying]);
+  useEffect(() => { if (libraryReady) writeStored(HISTORY_KEY, playHistory); }, [playHistory, libraryReady]);
+  useEffect(() => { if (libraryReady) writeStored(LIKED_KEY, likedTracks); }, [likedTracks, libraryReady]);
+  useEffect(() => { if (libraryReady) writeStored(PLAYLISTS_KEY, customPlaylists); }, [customPlaylists, libraryReady]);
 
-  // Capacitor Media Session Listeners
+  // Records when the user last edited a collection, so the newest device wins on restore
+  const touchSyncMeta = (key) => {
+    const meta = readStored(SYNC_META_KEY, {});
+    meta[key] = Date.now();
+    writeStored(SYNC_META_KEY, meta);
+  };
+
+  // Restore from the cloud BEFORE pushing anything, so a fresh device never wipes the saved library
   useEffect(() => {
-    let playSub, pauseSub, nextSub, prevSub;
-    const initListeners = async () => {
-      try {
-        playSub = await MediaSession.addListener("play", () => {
-          togglePlay();
-        });
-        pauseSub = await MediaSession.addListener("pause", () => {
-          togglePlay();
-        });
-        nextSub = await MediaSession.addListener("nexttrack", () => {
-          playNext();
-        });
-        prevSub = await MediaSession.addListener("previoustrack", () => {
-          playPrevious();
-        });
-      } catch (e) {}
-    };
-    initListeners();
+    if (!libraryReady || !user?.id) return;
+    let cancelled = false;
+    const userId = user.id;
+    syncProfileToCloud(user);
+
+    loadLibraryFromCloud(userId).then((cloud) => {
+      if (cancelled || !cloud) return;
+      const meta = readStored(SYNC_META_KEY, {});
+
+      const liked = resolveCollection(likedTracksRef.current, meta.liked || 0, cloud.likedTracks, cloud.likedUpdatedAt);
+      const playlists = resolveCollection(customPlaylistsRef.current, meta.playlists || 0, cloud.customPlaylists, cloud.playlistsUpdatedAt);
+      const history = mergeById(playHistoryRef.current, cloud.playHistory).slice(0, HISTORY_LIMIT);
+
+      meta.liked = Math.max(meta.liked || 0, cloud.likedUpdatedAt);
+      meta.playlists = Math.max(meta.playlists || 0, cloud.playlistsUpdatedAt);
+      writeStored(SYNC_META_KEY, meta);
+
+      // What the cloud already holds; identical values are not pushed back
+      lastPushedRef.current = {
+        liked: JSON.stringify(cloud.likedTracks),
+        playlists: JSON.stringify(cloud.customPlaylists),
+        history: JSON.stringify(cloud.playHistory)
+      };
+      setLikedTracks(liked);
+      setCustomPlaylists(playlists);
+      setPlayHistory(history);
+      setCloudUserId(userId);
+    });
+
+    return () => { cancelled = true; };
+  }, [libraryReady, user?.id]);
+
+  const pushIfChanged = (key, value, push) => {
+    if (!cloudUserId || cloudUserId !== user?.id) return;
+    const json = JSON.stringify(value);
+    if (lastPushedRef.current[key] === json) return;
+    lastPushedRef.current[key] = json;
+    push();
+  };
+
+  useEffect(() => {
+    pushIfChanged("history", playHistory, () => syncHistoryToCloud(playHistory, cloudUserId));
+  }, [playHistory, cloudUserId]);
+
+  useEffect(() => {
+    pushIfChanged("liked", likedTracks, () =>
+      syncLikedToCloud(likedTracks, cloudUserId, readStored(SYNC_META_KEY, {}).liked || Date.now()));
+  }, [likedTracks, cloudUserId]);
+
+  useEffect(() => {
+    pushIfChanged("playlists", customPlaylists, () =>
+      syncPlaylistsToCloud(customPlaylists, cloudUserId, readStored(SYNC_META_KEY, {}).playlists || Date.now()));
+  }, [customPlaylists, cloudUserId]);
+
+  // ─── Listening stats ─────────────────────────────────────
+
+  const saveListenStats = (stats) => {
+    listenStatsRef.current = stats;
+    writeStored(STATS_KEY, stats);
+    setListenStats(stats);
+  };
+
+  const flushListenStats = () => {
+    if (pendingListenRef.current <= 0) return;
+    const stats = listenStatsRef.current;
+    saveListenStats({ ...stats, totalSeconds: Math.round(stats.totalSeconds + pendingListenRef.current) });
+    pendingListenRef.current = 0;
+  };
+
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === "hidden") flushListenStats(); };
+    window.addEventListener("pagehide", flushListenStats);
+    document.addEventListener("visibilitychange", onHide);
     return () => {
-      if (playSub) playSub.remove();
-      if (pauseSub) pauseSub.remove();
-      if (nextSub) nextSub.remove();
-      if (prevSub) prevSub.remove();
+      window.removeEventListener("pagehide", flushListenStats);
+      document.removeEventListener("visibilitychange", onHide);
     };
   }, []);
 
+  // ─── Queue ───────────────────────────────────────────────
 
-  const playNext = (shouldAutoPlay = isPlayingRef.current) => {
-    const currentQ = queueRef.current;
-    const currentT = currentTrackRef.current;
-    if (currentQ.length <= 1 || !currentT) {
-      if (currentT) {
-        seekTo(0);
-      }
-      return;
+  const removeFromQueue = (trackId) => {
+    commitQueue(queueRef.current.filter(t => t.id !== trackId));
+    originalQueueRef.current = originalQueueRef.current.filter(t => t.id !== trackId);
+  };
+
+  const addToQueue = (track) => {
+    if (!track || queueRef.current.some(t => t.id === track.id)) return;
+    commitQueue([...queueRef.current, track]);
+    originalQueueRef.current = [...originalQueueRef.current, track];
+  };
+
+  const toggleShuffle = () => {
+    const nextShuffle = !isShuffleRef.current;
+    const current = currentTrackRef.current;
+    if (nextShuffle) {
+      originalQueueRef.current = queueRef.current;
+      commitQueue(shuffleAround(queueRef.current, current));
+    } else {
+      // Restore the original order, keeping tracks added or removed while shuffled
+      const live = new Set(queueRef.current.map(t => t.id));
+      const restored = originalQueueRef.current.filter(t => live.has(t.id));
+      const restoredIds = new Set(restored.map(t => t.id));
+      commitQueue([...restored, ...queueRef.current.filter(t => !restoredIds.has(t.id))]);
     }
-    const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
-    if (currentIndex !== -1) {
-      const nextIndex = (currentIndex + 1) % currentQ.length;
-      playTrack(currentQ[nextIndex], currentQ, shouldAutoPlay);
+    isShuffleRef.current = nextShuffle;
+    setIsShuffle(nextShuffle);
+  };
+
+  const applyNewQueue = (newQueue, track) => {
+    if (isSameQueue(newQueue, queueRef.current)) return;
+    originalQueueRef.current = newQueue;
+    commitQueue(isShuffleRef.current ? shuffleAround(newQueue, track) : newQueue);
+  };
+
+  // ─── Playback ────────────────────────────────────────────
+
+  const safePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const attempt = audio.play();
+    if (!attempt?.then) return;
+    attempt
+      .then(() => { unlockedRef.current = true; })
+      .catch(err => {
+        if (err.name === 'AbortError') return; // superseded by a newer track load
+        setIsBuffering(false);
+        setIsPlaying(false);
+        if (err.name === 'NotAllowedError') {
+          toast("Tap play to start listening");
+        } else {
+          console.warn('HTML audio play failed:', err);
+        }
+      });
+  };
+
+  const revokeBlobUrl = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
     }
   };
 
-  const playPrevious = (shouldAutoPlay = isPlayingRef.current) => {
+  const playFromCache = async (track, trackId, shouldAutoPlay) => {
+    if (typeof window === "undefined" || !("caches" in window)) return false;
+    try {
+      const cache = await caches.open(AUDIO_CACHE);
+      const response = (await cache.match(streamKey(trackId))) || (track.url ? await cache.match(track.url) : null);
+      if (!response) return false;
+      const blob = await response.blob();
+      const audio = audioRef.current;
+      if (!audio || currentTrackRef.current?.id !== track.id) return true;
+      revokeBlobUrl();
+      blobUrlRef.current = URL.createObjectURL(blob);
+      audio.src = blobUrlRef.current;
+      console.log("AuraSynq Debug: Playing cached audio locally", track.title);
+      if (shouldAutoPlay) safePlay(); else setIsBuffering(false);
+      return true;
+    } catch (err) {
+      console.warn("Offline cache playback failed:", err);
+      return false;
+    }
+  };
+
+  const fetchLyricsFromApi = useRef(null);
+  const lyricsAbortRef = useRef(null);
+  fetchLyricsFromApi.current = async (title, artist, trackId, hadOwnLyrics) => {
+    if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
+    lyricsAbortRef.current = new AbortController();
+    const signal = lyricsAbortRef.current.signal;
+
+    let lyricsLines = null;
+    try {
+      const url = `/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
+      const res = await fetch(url, { signal });
+      if (res.ok) {
+        const data = await res.json();
+        lyricsLines = data.syncedLyrics
+          ? parseLRC(data.syncedLyrics)
+          : parsePlainLyrics(data.plainLyrics, data.duration);
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return null;
+    }
+
+    if (lyricsLines?.length) {
+      setCurrentTrack(prev => (prev && prev.id === trackId ? { ...prev, lyrics: lyricsLines } : prev));
+      return lyricsLines;
+    }
+    // Replace the "Searching..." placeholder with a definitive answer
+    if (!hadOwnLyrics) {
+      setCurrentTrack(prev => (prev && prev.id === trackId ? { ...prev, lyrics: noLyricsFound(title, artist) } : prev));
+    }
+    return null;
+  };
+
+  const stopAudio = () => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      // removeAttribute + load() empties the element without firing an error event
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    revokeBlobUrl();
+    flushListenStats();
+    setCurrent(null);
+    setIsPlaying(false);
+    setIsBuffering(false);
+    setProgress(0);
+    setDuration(0);
+    commitQueue([]);
+    originalQueueRef.current = [];
+  };
+
+  const addToHistory = (track) => {
+    const light = lightTrack(track);
+    setPlayHistory(prev => [light, ...prev.filter(t => t.id !== track.id)].slice(0, HISTORY_LIMIT));
+    const stats = listenStatsRef.current;
+    saveListenStats({ ...stats, trackPlays: stats.trackPlays + 1 });
+  };
+
+  const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
+    if (!track) return;
+
+    if (newQueue) {
+      applyNewQueue(newQueue, track);
+    } else if (!queueRef.current.some(t => t.id === track.id)) {
+      addToQueue(track);
+    }
+
+    const audio = audioRef.current;
+
+    if (currentTrackRef.current?.id === track.id) {
+      seekTo(0);
+      if (shouldAutoPlay) safePlay();
+      return;
+    }
+
+    flushListenStats();
+    trackListenRef.current = 0;
+    lastTickRef.current = null;
+
+    const hadOwnLyrics = !!track.lyrics;
+    setCurrent({ ...track, lyrics: track.lyrics || generateMockLyrics(track.title, track.artist) });
+    setIsBuffering(shouldAutoPlay);
+    setProgress(0);
+    setDuration(0);
+    addToHistory(track);
+    fetchLyricsFromApi.current(track.title, track.artist, track.id, hadOwnLyrics);
+
+    if (!audio) return;
+    revokeBlobUrl();
+
+    const trackId = extractId(track);
+    const isYouTube = !!trackId && YOUTUBE_ID.test(trackId);
+    const online = typeof navigator === "undefined" || navigator.onLine !== false;
+    const isCached = cachedIdsRef.current.has(trackId);
+
+    const startNetwork = (src) => {
+      audio.src = src;
+      audio.currentTime = 0;
+      if (shouldAutoPlay) safePlay(); else setIsBuffering(false);
+    };
+
+    // Cached songs play from the device once the element is unlocked (saves data, works offline).
+    // Otherwise start synchronously to keep the user-gesture context mobile browsers require.
+    if (online && !(isCached && unlockedRef.current)) {
+      if (isYouTube) return startNetwork(streamKey(trackId));
+      if (track.url && DIRECT_AUDIO.test(track.url)) return startNetwork(track.url);
+    }
+
+    playFromCache(track, trackId, shouldAutoPlay).then((played) => {
+      if (played || currentTrackRef.current?.id !== track.id) return;
+      if (online && isYouTube) return startNetwork(streamKey(trackId));
+      if (online && track.url && DIRECT_AUDIO.test(track.url)) return startNetwork(track.url);
+      setIsBuffering(false);
+      setIsPlaying(false);
+      toast(online ? "This song can't be played right now." : "You're offline — this song isn't downloaded.", { variant: "error" });
+    });
+  };
+
+  // Keep the vibe going: when the queue runs out, append similar tracks instead of looping
+  const extendQueueWithRadio = (seed) => {
+    if (radioPendingRef.current) return radioPendingRef.current;
+    const run = (async () => {
+      try {
+        const artist = cleanArtistName(seed.artist);
+        const query = artist && artist !== "Unknown Artist"
+          ? `${artist} best songs`
+          : `${shortTitle(seed.title)} similar songs`;
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const known = new Set([...queueRef.current, ...playHistoryRef.current].map(t => t.id));
+        const fresh = (data.tracks || [])
+          .filter(t => t?.id && !known.has(t.id) && !LONG_FORM.test(t.title || ""))
+          .slice(0, RADIO_BATCH);
+        if (fresh.length) {
+          commitQueue([...queueRef.current, ...fresh]);
+          originalQueueRef.current = [...originalQueueRef.current, ...fresh];
+          toast(`📻 Aura Radio queued ${fresh.length} songs like "${shortTitle(seed.title).slice(0, 28)}"`);
+        }
+        return fresh;
+      } catch (e) {
+        return [];
+      } finally {
+        radioPendingRef.current = null;
+      }
+    })();
+    radioPendingRef.current = run;
+    return run;
+  };
+
+  const playNext = (shouldAutoPlay = !audioRef.current?.paused) => {
+    const currentQ = queueRef.current;
+    const currentT = currentTrackRef.current;
+    if (!currentT) return;
+
+    const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
+    if (currentIndex === -1) {
+      if (currentQ.length) playTrack(currentQ[0], null, shouldAutoPlay);
+      return;
+    }
+    if (currentIndex < currentQ.length - 1) {
+      playTrack(currentQ[currentIndex + 1], null, shouldAutoPlay);
+      return;
+    }
+
+    extendQueueWithRadio(currentT).then((added) => {
+      if (currentTrackRef.current?.id !== currentT.id) return; // user already moved on
+      if (added.length) playTrack(added[0], null, shouldAutoPlay);
+      else if (currentQ.length > 1) playTrack(currentQ[0], null, shouldAutoPlay);
+      else seekTo(0);
+    });
+  };
+
+  const playPrevious = (shouldAutoPlay = !audioRef.current?.paused) => {
     const currentQ = queueRef.current;
     const currentT = currentTrackRef.current;
     if (!currentT) return;
@@ -314,326 +639,151 @@ export function AudioProvider({ children }) {
     const currentIndex = currentQ.findIndex(t => t.id === currentT.id);
     if (currentIndex !== -1) {
       const prevIndex = (currentIndex - 1 + currentQ.length) % currentQ.length;
-      playTrack(currentQ[prevIndex], currentQ, shouldAutoPlay);
+      playTrack(currentQ[prevIndex], null, shouldAutoPlay);
     }
   };
 
-
-  const abortControllerRef = useRef(null);
-
-  const fetchLyricsFromApi = async (title, artist, trackId) => {
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
-
-    try {
-      const url = `/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
-      const res = await fetch(url, { signal });
-      
-      if (!res.ok) throw new Error("Lyrics API failed");
-      
-      const data = await res.json();
-      
-      const lyricsLines = data.syncedLyrics 
-        ? parseLRC(data.syncedLyrics) 
-        : parsePlainLyrics(data.plainLyrics, data.duration);
-      
-      if (lyricsLines && lyricsLines.length > 0) {
-        console.log("AuraSynq Debug: Found and synced search-query lyrics successfully!");
-        setCurrentTrack(prev => {
-          if (prev && prev.id === trackId) {
-            return { ...prev, lyrics: lyricsLines };
-          }
-          return prev;
-        });
-        return lyricsLines;
-      } else {
-        throw new Error("Lyrics API failed to return match");
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') return null;
-      console.warn("AuraSynq Debug: Failed to fetch real lyrics from database:", err);
-    }
-    return null;
+  const resume = () => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrackRef.current) return;
+    // Retry a failed stream instead of calling play() on a dead source
+    if (audio.error) audio.load();
+    safePlay();
   };
 
-  const stopAudio = () => {
-    try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
-    } catch (err) {}
-    setCurrentTrack(null);
-    setIsPlaying(false);
-    setIsBuffering(false);
-    setProgress(0);
-    setDuration(0);
-    setQueue([]);
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  };
-
-  const addToHistory = (track) => {
-    setPlayHistory(prev => {
-      const filtered = prev.filter(t => t.id !== track.id);
-      
-      // Strip heavy payloads before saving to LocalStorage to prevent quota limits
-      const lightTrack = { ...track };
-      delete lightTrack.lyrics;
-      delete lightTrack.djIntro;
-      
-      const updated = [lightTrack, ...filtered].slice(0, 20);
-      try {
-        localStorage.setItem('aurasynq_play_history', JSON.stringify(updated));
-      } catch (e) {}
-      
-      if (user?.id) syncHistoryToCloud(updated, user.id);
-      return updated;
-    });
-  };
-
-  const playTrack = (track, newQueue = null, shouldAutoPlay = true) => {
-    // Set queue if provided, or build one
-    if (newQueue) {
-      setQueue(newQueue);
-    } else {
-      setQueue(prev => {
-        const exists = prev.some(t => t.id === track.id);
-        if (!exists) return [...prev, track];
-        return prev;
-      });
-    }
-
-    if (currentTrackRef.current?.id !== track.id) {
-      const trackWithLyrics = {
-        ...track,
-        lyrics: track.lyrics || generateMockLyrics(track.title, track.artist)
-      };
-      setCurrentTrack(trackWithLyrics);
-      if (shouldAutoPlay) setIsBuffering(true);
-      setProgress(0);
-      setDuration(0);
-      addToHistory(track);
-      fetchLyricsFromApi(track.title, track.artist, track.id);
-
-      const extractId = (t) => {
-        if (!t) return null;
-        if (t.id && /^[A-Za-z0-9_-]{11}$/.test(t.id)) return t.id;
-        if (t.url) {
-          const m1 = t.url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-          if (m1 && m1[1]) return m1[1];
-          const m2 = t.url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-          if (m2 && m2[1]) return m2[1];
-        }
-        return t.id || null;
-      };
-      const trackId = extractId(track);
-      const cacheKey = `/api/stream?id=${trackId}`;
-      let audioSrc = (typeof navigator !== "undefined" && navigator.onLine) ? cacheKey : null;
-
-      // SYNCHRONOUS SETUP: Start playback immediately without waiting for async operations
-      // This preserves the critical user gesture context for strict mobile browser policies.
-      if (audioRef.current) {
-        if (audioSrc) {
-          audioRef.current.src = audioSrc;
-          audioRef.current.currentTime = 0;
-          if (shouldAutoPlay) {
-            audioRef.current.play().catch(err => {
-              console.warn('HTML audio play failed synchronously:', err);
-              setIsBuffering(false);
-              setIsPlaying(false);
-            });
-          } else {
-            setIsBuffering(false);
-          }
-        }
-      }
-
-      (async () => {
-        try {
-          if (audioRef.current) {
-            // Background cache check
-            try {
-              if (typeof window !== "undefined" && "caches" in window) {
-                const cache = await caches.open("aurasynq_offline_audio");
-                const matchedResponse = await cache.match(cacheKey);
-                if (matchedResponse) {
-                  if (!audioSrc) { // We are offline, use cache
-                    const blob = await matchedResponse.blob();
-                    const offlineSrc = URL.createObjectURL(blob);
-                    console.log("AuraSynq Debug: Playing cached audio locally offline", track.title);
-                    if (audioRef.current && currentTrackRef.current?.id === track.id) {
-                      audioRef.current.src = offlineSrc;
-                      audioRef.current.currentTime = 0;
-                      if (shouldAutoPlay) {
-                        audioRef.current.play().catch(e => console.warn(e));
-                      } else {
-                        setIsBuffering(false);
-                      }
-                    }
-                  }
-                } else if (navigator.onLine) {
-                  // Delay background caching to prioritize streaming
-                  setTimeout(() => {
-                    if (currentTrackRef.current?.id === track.id) {
-                      console.log("AuraSynq Debug: Background downloading and caching track", track.title);
-                      fetch(cacheKey).then(async (response) => {
-                        if (response.ok) {
-                          const cacheCopy = await caches.open("aurasynq_offline_audio");
-                          await cacheCopy.put(cacheKey, response);
-                          if (track.cover) {
-                            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-                            if (imgRes) await cacheCopy.put(track.cover, imgRes);
-                          }
-                        }
-                      }).catch(e => console.warn("Background caching failed", e));
-                    }
-                  }, 12000);
-                }
-              }
-            } catch (cacheErr) {
-              console.warn("Offline caching matching failed:", cacheErr);
-            }
-            
-            if (!audioSrc) {
-              if (track.url && (track.url.includes('.mp3') || track.url.includes('.m4a') || track.url.includes('.wav'))) {
-                audioSrc = track.url;
-                if (audioRef.current && currentTrackRef.current?.id === track.id) {
-                  audioRef.current.src = audioSrc;
-                  audioRef.current.currentTime = 0;
-                  if (shouldAutoPlay) {
-                    audioRef.current.play().catch(e => console.warn(e));
-                  } else {
-                    setIsBuffering(false);
-                  }
-                }
-              } else {
-                console.warn("No valid audio source found for track:", track.title);
-                setIsBuffering(false);
-                setIsPlaying(false);
-                if (typeof window !== "undefined") {
-                  alert("Failed to play: This song is unavailable offline.");
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Direct audio playback failed:', err);
-        }
-      })();
-    } else {
-      seekTo(0);
-      if (shouldAutoPlay && audioRef.current) {
-        audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
-      }
-    }
-  };
+  const pause = () => audioRef.current?.pause();
 
   const togglePlay = () => {
-    if (currentTrack && audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play().catch(err => console.warn('HTML audio play failed:', err));
-      }
-    }
+    const audio = audioRef.current;
+    if (!audio || !currentTrackRef.current) return;
+    if (audio.paused) resume(); else pause();
+  };
+
+  const syncPositionState = () => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    withMediaSession(ms => ms.setPositionState({
+      duration: audio.duration,
+      playbackRate: audio.playbackRate || 1,
+      position: Math.min(audio.currentTime || 0, audio.duration)
+    }));
   };
 
   const seekTo = (seconds) => {
-    if (!currentTrack) return;
-    if (audioRef.current) {
-      try {
-        audioRef.current.currentTime = seconds;
-        setProgress(seconds);
-      } catch (err) {
-        console.warn('HTML audio seek failed:', err);
-      }
+    const audio = audioRef.current;
+    if (!currentTrackRef.current || !audio) return;
+    try {
+      const max = Number.isFinite(audio.duration) ? audio.duration : seconds;
+      const target = Math.max(0, Math.min(seconds, max));
+      audio.currentTime = target;
+      lastTickRef.current = null;
+      setProgress(target);
+      syncPositionState();
+    } catch (err) {
+      console.warn('HTML audio seek failed:', err);
     }
   };
 
+  // Latest handlers for lock screen / notification callbacks registered once
+  const actionsRef = useRef({});
+  actionsRef.current = { resume, pause, playNext, playPrevious, seekTo };
 
-
-  // Register HTML5 Media Session API metadata for lock screen integration
   useEffect(() => {
-    if (typeof window !== "undefined" && "mediaSession" in navigator && currentTrack) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentTrack.title,
-        artist: currentTrack.artist,
-        album: "AuraSynq Aura",
-        artwork: [
-          { src: currentTrack.cover || "/icon-192x192.png", sizes: "192x192", type: "image/png" },
-          { src: currentTrack.cover || "/icon-512x512.png", sizes: "512x512", type: "image/png" }
-        ]
-      });
+    const handlers = {
+      play: () => actionsRef.current.resume(),
+      pause: () => actionsRef.current.pause(),
+      stop: () => actionsRef.current.pause(),
+      nexttrack: () => actionsRef.current.playNext(true),
+      previoustrack: () => actionsRef.current.playPrevious(true),
+      seekto: (details) => {
+        if (details?.seekTime != null) actionsRef.current.seekTo(details.seekTime);
+      },
+      seekforward: (details) => actionsRef.current.seekTo(progressRef.current + (details?.seekOffset || 10)),
+      seekbackward: (details) => actionsRef.current.seekTo(progressRef.current - (details?.seekOffset || 10))
+    };
+    withMediaSession((ms) => Promise.all(Object.entries(handlers).map(([action, handler]) =>
+      Promise.resolve().then(() => ms.setActionHandler({ action }, handler)).catch(() => {})
+    )));
+  }, []);
 
-      navigator.mediaSession.setActionHandler("play", () => setIsPlaying(true));
-      navigator.mediaSession.setActionHandler("pause", () => setIsPlaying(false));
-      navigator.mediaSession.setActionHandler("nexttrack", () => playNext(true));
-      navigator.mediaSession.setActionHandler("previoustrack", () => playPrevious(true));
-      navigator.mediaSession.setActionHandler("seekto", (details) => {
-        if (details.seekTime !== undefined) seekTo(details.seekTime);
-      });
-      
-      // Capacitor MediaSession integration
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.MediaSession) {
-        window.Capacitor.Plugins.MediaSession.setMetadata({
-          title: currentTrack.title,
-          artist: currentTrack.artist
-        });
-      }
-    }
+  // Lock screen / notification metadata
+  useEffect(() => {
+    if (!currentTrack) return;
+    const cover = currentTrack.cover || "/icon-512x512.png";
+    withMediaSession(ms => ms.setMetadata({
+      title: shortTitle(currentTrack.title) || currentTrack.title,
+      artist: currentTrack.artist,
+      album: "AuraSynq",
+      artwork: [
+        { src: cover, sizes: "192x192" },
+        { src: cover, sizes: "512x512" }
+      ]
+    }));
   }, [currentTrack?.id]);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && "mediaSession" in navigator && currentTrack) {
-      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
-    }
+    if (!currentTrack) return;
+    withMediaSession(ms => ms.setPlaybackState({ playbackState: isPlaying ? "playing" : "paused" }));
   }, [isPlaying, currentTrack?.id]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && "mediaSession" in navigator && currentTrack && durationRef.current > 0) {
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: durationRef.current,
-          playbackRate: 1.0,
-          position: progressRef.current
-        });
-      } catch (err) {
-        console.warn("MediaSession setPositionState error:", err);
+  // ─── Prefetch & offline cache ────────────────────────────
+
+  // Resolve the next song's stream on the server ahead of time so skipping feels instant
+  const warmNextTrack = () => {
+    const currentQ = queueRef.current;
+    const index = currentQ.findIndex(t => t.id === currentTrackRef.current?.id);
+    const next = index !== -1 ? currentQ[index + 1] : null;
+    const nextId = extractId(next);
+    if (!nextId || !YOUTUBE_ID.test(nextId) || warmedIdsRef.current.has(nextId)) return;
+    warmedIdsRef.current.add(nextId);
+    fetch(`${streamKey(nextId)}&warm=1`).catch(() => {});
+  };
+
+  const autoCacheTrack = async (track) => {
+    const trackId = extractId(track);
+    if (!trackId || !YOUTUBE_ID.test(trackId) || cachedIdsRef.current.has(trackId)) return;
+    if (!("caches" in window) || navigator.onLine === false || navigator.connection?.saveData) return;
+    cachedIdsRef.current.add(trackId);
+    try {
+      const cache = await caches.open(AUDIO_CACHE);
+      const response = await fetch(streamKey(trackId));
+      if (response.status !== 200) throw new Error(`HTTP ${response.status}`);
+      await cache.put(streamKey(trackId), response);
+
+      // Keep only the most recent auto-cached songs; explicit downloads are never evicted
+      const downloaded = new Set(readStored(DOWNLOADS_KEY).map(t => extractId(t)));
+      const list = [trackId, ...readStored(AUTO_CACHE_KEY).filter(id => id !== trackId)];
+      while (list.length > AUTO_CACHE_LIMIT) {
+        const evicted = list.pop();
+        if (!downloaded.has(evicted)) {
+          await cache.delete(streamKey(evicted));
+          cachedIdsRef.current.delete(evicted);
+        }
       }
+      writeStored(AUTO_CACHE_KEY, list);
+    } catch (e) {
+      cachedIdsRef.current.delete(trackId);
+      console.warn("Background caching failed", e);
     }
-  }, [currentTrack?.id]);
+  };
 
-  // History, liked songs, and custom playlists are now initialized lazily in useState.
+  // ─── Library ─────────────────────────────────────────────
 
-  // Liking implementation
   const toggleLikeTrack = (track) => {
-    setLikedTracks(prev => {
-      let updated;
-      const isLiked = prev.some(t => t.id === track.id);
-      if (isLiked) {
-        updated = prev.filter(t => t.id !== track.id);
-      } else {
-        const lightTrack = { ...track };
-        delete lightTrack.lyrics;
-        delete lightTrack.djIntro;
-        updated = [...prev, lightTrack];
-      }
-      
-      try {
-        localStorage.setItem('aurasynq_liked_songs_metadata', JSON.stringify(updated));
-      } catch (e) {}
-      
-      if (user?.id) syncLikedToCloud(updated, user.id);
-      return updated;
-    });
+    if (!track) return;
+    touchSyncMeta("liked");
+    setLikedTracks(prev => (prev.some(t => t.id === track.id)
+      ? prev.filter(t => t.id !== track.id)
+      : [...prev, lightTrack(track)]));
   };
 
   const isTrackLiked = (trackId) => {
     return likedTracks.some(t => t.id === trackId);
+  };
+
+  const updatePlaylists = (updater) => {
+    touchSyncMeta("playlists");
+    setCustomPlaylists(updater);
   };
 
   // Custom playlists implementation
@@ -645,110 +795,70 @@ export function AudioProvider({ children }) {
       isCollaborative: false,
       collaborators: []
     };
-    setCustomPlaylists(prev => {
-      const updated = [...prev, newPlaylist];
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => [...prev, newPlaylist]);
     return newPlaylist;
   };
 
   const deletePlaylist = (playlistId) => {
-    setCustomPlaylists(prev => {
-      const updated = prev.filter(p => p.id !== playlistId);
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => prev.filter(p => p.id !== playlistId));
   };
 
   const renamePlaylist = (playlistId, newName) => {
-    setCustomPlaylists(prev => {
-      const updated = prev.map(p => p.id === playlistId ? { ...p, name: newName } : p);
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => prev.map(p => p.id === playlistId ? { ...p, name: newName } : p));
   };
 
   const addTrackToPlaylist = (playlistId, track) => {
     if (!track) return;
-    setCustomPlaylists(prev => {
-      const updated = prev.map(p => {
-        if (p.id === playlistId) {
-          const exists = p.tracks.some(t => t.id === track.id);
-          if (!exists) {
-            return { ...p, tracks: [...p.tracks, track] };
-          }
-        }
-        return p;
-      });
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => prev.map(p => {
+      if (p.id !== playlistId || p.tracks.some(t => t.id === track.id)) return p;
+      return { ...p, tracks: [...p.tracks, lightTrack(track)] };
+    }));
   };
 
   const removeTrackFromPlaylist = (playlistId, trackId) => {
-    setCustomPlaylists(prev => {
-      const updated = prev.map(p => {
-        if (p.id === playlistId) {
-          return { ...p, tracks: p.tracks.filter(t => t.id !== trackId) };
-        }
-        return p;
-      });
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => prev.map(p =>
+      p.id === playlistId ? { ...p, tracks: p.tracks.filter(t => t.id !== trackId) } : p
+    ));
   };
 
   const toggleCollaborative = (playlistId) => {
-    setCustomPlaylists(prev => {
-      const updated = prev.map(p => {
-        if (p.id === playlistId) {
-          const nextCollab = !p.isCollaborative;
-          const collaborators = nextCollab ? [
-            { name: "Arun", avatar: "https://i.pravatar.cc/150?u=arun_blend" },
-            { name: "Meera", avatar: "https://i.pravatar.cc/150?u=meera_blend" }
-          ] : [];
-          return { ...p, isCollaborative: nextCollab, collaborators };
-        }
-        return p;
-      });
-      try { localStorage.setItem('aurasynq_custom_playlists', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    updatePlaylists(prev => prev.map(p => {
+      if (p.id !== playlistId) return p;
+      const nextCollab = !p.isCollaborative;
+      const collaborators = nextCollab ? [
+        { name: "Arun", avatar: "https://i.pravatar.cc/150?u=arun_blend" },
+        { name: "Meera", avatar: "https://i.pravatar.cc/150?u=meera_blend" }
+      ] : [];
+      return { ...p, isCollaborative: nextCollab, collaborators };
+    }));
   };
 
-  // Offline Caching helpers
+  // Offline downloads: YouTube songs via the same-origin stream proxy, direct audio by URL
   const downloadTrack = async (track) => {
     if (typeof window === "undefined" || !("caches" in window) || !track) return false;
+    const trackId = extractId(track);
+    const key = trackId && YOUTUBE_ID.test(trackId)
+      ? streamKey(trackId)
+      : (track.url && DIRECT_AUDIO.test(track.url) ? track.url : null);
+    if (!key) return false;
+
     try {
-      const isDirectAudio = track.url && /\.mp3($|\?)/i.test(track.url);
-      if (!isDirectAudio) return false;
-      
-      const cache = await caches.open("aurasynq_offline_audio");
-      const matched = await cache.match(track.url);
-      if (!matched) {
-        const res = await fetch(track.url);
-        if (res.ok) {
-          await cache.put(track.url, res);
-          if (track.cover) {
-            const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
-            if (imgRes) await cache.put(track.cover, imgRes);
-          }
-        } else {
-          return false;
-        }
+      const cache = await caches.open(AUDIO_CACHE);
+      if (!(await cache.match(key))) {
+        const res = await fetch(key);
+        if (res.status !== 200) return false;
+        await cache.put(key, res);
       }
-      
-      try {
-        const stored = localStorage.getItem("aurasynq_downloaded_metadata");
-        const list = stored ? JSON.parse(stored) : [];
-        if (!list.some(t => t.id === track.id)) {
-          list.push(track);
-          localStorage.setItem("aurasynq_downloaded_metadata", JSON.stringify(list));
-        }
-      } catch (e) {
-        console.warn(e);
+      if (track.cover) {
+        const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);
+        if (imgRes) await cache.put(track.cover, imgRes).catch(() => {});
       }
+
+      const list = readStored(DOWNLOADS_KEY);
+      if (!list.some(t => t.id === track.id)) {
+        writeStored(DOWNLOADS_KEY, [...list, lightTrack(track)]);
+      }
+      cachedIdsRef.current.add(trackId);
       return true;
     } catch (err) {
       console.warn("Global download track failed", err);
@@ -759,16 +869,17 @@ export function AudioProvider({ children }) {
   const deleteDownloadedTrack = async (trackId) => {
     if (typeof window === "undefined" || !("caches" in window)) return false;
     try {
-      const stored = localStorage.getItem("aurasynq_downloaded_metadata");
-      const list = stored ? JSON.parse(stored) : [];
+      const list = readStored(DOWNLOADS_KEY);
       const track = list.find(t => t.id === trackId);
       if (track) {
-        const cache = await caches.open("aurasynq_offline_audio");
-        await cache.delete(track.url);
+        const cache = await caches.open(AUDIO_CACHE);
+        const id = extractId(track);
+        await cache.delete(streamKey(id));
+        if (track.url) await cache.delete(track.url);
         if (track.cover) await cache.delete(track.cover);
+        cachedIdsRef.current.delete(id);
       }
-      const updated = list.filter(t => t.id !== trackId);
-      localStorage.setItem("aurasynq_downloaded_metadata", JSON.stringify(updated));
+      writeStored(DOWNLOADS_KEY, list.filter(t => t.id !== trackId));
       return true;
     } catch (err) {
       console.warn("Global delete downloaded track failed", err);
@@ -776,49 +887,57 @@ export function AudioProvider({ children }) {
     }
   };
 
-  // Shared track link auto-play logic
-  useEffect(() => {
-    if (typeof window === "undefined" || !mounted) return;
-    const urlParams = new URLSearchParams(window.location.search);
-    const trackId = urlParams.get("track");
-    if (!trackId) return;
+  // ─── Shared links ────────────────────────────────────────
 
-    const loadSharedTrack = async () => {
-      try {
-        console.log("AuraSynq Debug: Shared track detected. Fetching track metadata for", trackId);
-        const res = await fetch(`/api/search?q=${encodeURIComponent(trackId)}`);
-        const data = await res.json();
-        if (data.tracks && data.tracks.length > 0) {
-          const matchedTrack = data.tracks[0];
-          setSharedTrackInfo(matchedTrack);
-          // Play the track automatically
-          playTrack(matchedTrack, [matchedTrack], true);
-        }
-      } catch (err) {
-        console.warn("Failed to load shared track", err);
-      }
-    };
-    loadSharedTrack();
-  }, [mounted]);
+  // Shows the shared-song banner; playback starts when the user taps it (autoplay needs a gesture)
+  const openSharedTrack = async ({ id, title, artist }) => {
+    if (!id || !YOUTUBE_ID.test(id)) return;
+    setSharedTrackInfo({
+      id,
+      title: title || "Shared Song",
+      artist: artist || "Someone shared a vibe with you",
+      cover: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+      url: `https://www.youtube.com/watch?v=${id}`,
+      hue: Math.floor(Math.random() * 360)
+    });
+    if (title) return;
+
+    // Older links carry only the id: look the metadata up
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      const match = data.tracks?.find(t => t.id === id);
+      if (match) setSharedTrackInfo(prev => (prev?.id === id ? { ...prev, ...match } : prev));
+    } catch (err) {
+      console.warn("Failed to load shared track", err);
+    }
+  };
+
+  const playSharedTrack = () => {
+    const shared = sharedTrackInfo;
+    if (!shared) return;
+    playTrack(shared, [shared], true);
+    setSharedTrackInfo(null);
+  };
 
   const clearSharedTrack = () => setSharedTrackInfo(null);
 
   // User taste profile analyzer based on actual play history
-  const getUserTasteProfile = () => {
+  const getUserTasteProfile = useCallback(() => {
     if (playHistory.length === 0) {
       return { topArtist: "None", topGenre: "None", dominantMood: "None", stats: null };
     }
-    
+
     const artistCounts = {};
     const genreCounts = {};
     const moodCounts = {};
-    
+
     playHistory.forEach(track => {
       if (track.artist) {
         const artistClean = track.artist.trim();
         artistCounts[artistClean] = (artistCounts[artistClean] || 0) + 1;
       }
-      
+
       let genre = "Pop";
       const titleLower = (track.title || "").toLowerCase();
       if (titleLower.includes("lofi") || titleLower.includes("chill") || titleLower.includes("relax") || titleLower.includes("coffee") || titleLower.includes("sunday")) genre = "Lofi/Chill";
@@ -826,14 +945,14 @@ export function AudioProvider({ children }) {
       else if (titleLower.includes("synth") || titleLower.includes("retro") || titleLower.includes("electro") || titleLower.includes("dance") || titleLower.includes("edm")) genre = "Electronic";
       else if (titleLower.includes("rock") || titleLower.includes("metal") || titleLower.includes("classic")) genre = "Rock";
       else if (track.artist?.toLowerCase().includes("ilayaraja") || track.artist?.toLowerCase().includes("rahman") || titleLower.includes("tamil") || track.artist?.toLowerCase().includes("anirudh")) genre = "Tamil Hits";
-      
+
       genreCounts[genre] = (genreCounts[genre] || 0) + 1;
 
       let mood = "Chill";
       if (titleLower.includes("workout") || titleLower.includes("gym") || titleLower.includes("motivation") || titleLower.includes("energetic")) mood = "Energetic";
       else if (titleLower.includes("sleep") || titleLower.includes("calm") || titleLower.includes("relaxing") || titleLower.includes("nature")) mood = "Peaceful";
       else if (titleLower.includes("sad") || titleLower.includes("breakup") || titleLower.includes("failure") || titleLower.includes("valigal")) mood = "Melancholic";
-      
+
       moodCounts[mood] = (moodCounts[mood] || 0) + 1;
     });
 
@@ -849,20 +968,51 @@ export function AudioProvider({ children }) {
       return topItem;
     };
 
-    const topArtist = getTop(artistCounts);
-    const topGenre = getTop(genreCounts);
-    const dominantMood = getTop(moodCounts);
-
     return {
-      topArtist,
-      topGenre,
-      dominantMood,
+      topArtist: getTop(artistCounts),
+      topGenre: getTop(genreCounts),
+      dominantMood: getTop(moodCounts),
       stats: {
         artistsCount: Object.keys(artistCounts).length,
         genres: Object.entries(genreCounts).map(([name, val]) => ({ name, percentage: Math.round((val / playHistory.length) * 100) })),
         moods: Object.entries(moodCounts).map(([name, val]) => ({ name, percentage: Math.round((val / playHistory.length) * 100) }))
       }
     };
+  }, [playHistory]);
+
+  // ─── Audio element events ────────────────────────────────
+
+  const handleAudioError = () => {
+    const audio = audioRef.current;
+    const track = currentTrackRef.current;
+    // Ignore errors from an intentionally emptied element
+    if (!audio || !track || !audio.getAttribute('src')) return;
+    console.warn("Audio element error:", audio.error);
+    setIsBuffering(false);
+    setIsPlaying(false);
+
+    // Streaming failed but the song is saved on this device: play that copy instead
+    const trackId = extractId(track);
+    if (!audio.src.startsWith('blob:') && cachedIdsRef.current.has(trackId)) {
+      playFromCache(track, trackId, true);
+      return;
+    }
+
+    // Prevent infinite skip loops during global YouTube outages
+    consecutiveErrorsRef.current += 1;
+    if (consecutiveErrorsRef.current > 3) {
+      consecutiveErrorsRef.current = 0;
+      console.error("Multiple stream failures detected. YouTube streaming is likely blocked.");
+      toast(
+        navigator.onLine !== false
+          ? "YouTube streaming is currently disrupted. Playback paused."
+          : "You're offline. Downloaded songs still play from your Profile.",
+        { variant: "error", duration: 4500 }
+      );
+      return;
+    }
+    toast(`Couldn't stream "${shortTitle(track.title).slice(0, 30)}" — skipping`, { variant: "error" });
+    playNext(true);
   };
 
   return (
@@ -872,56 +1022,65 @@ export function AudioProvider({ children }) {
       customPlaylists, setCustomPlaylists, createPlaylist, deletePlaylist, renamePlaylist, addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
       contextPlaylist, setContextPlaylist,
       downloadTrack, deleteDownloadedTrack,
-      sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, getUserTasteProfile
+      sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, openSharedTrack, playSharedTrack,
+      getUserTasteProfile, listenStats
     }}>
       {children}
-      {mounted && currentTrack && (
-        <audio 
+      {/* Always mounted: the very first tap must find an element to load and play synchronously */}
+      {mounted && (
+        <audio
           ref={audioRef}
+          preload="auto"
           style={{ display: "none" }}
           onPlay={() => {
             setIsPlaying(true);
-            setIsBuffering(false);
-            window._auraConsecutiveErrors = 0;
+            syncPositionState();
           }}
-          onPause={() => setIsPlaying(false)}
+          onPlaying={() => {
+            setIsBuffering(false);
+            consecutiveErrorsRef.current = 0;
+            warmNextTrack();
+          }}
+          onPause={() => {
+            setIsPlaying(false);
+            flushListenStats();
+            syncPositionState();
+          }}
           onEnded={() => {
             setIsPlaying(false);
             setProgress(0);
             playNext(true);
           }}
-          onTimeUpdate={(e) => {
-            const a = e.target;
-            setProgress(a.currentTime || 0);
-            setDuration(a.duration || 0);
+          onLoadedMetadata={(e) => {
+            setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
+            syncPositionState();
           }}
-          onWaiting={() => setIsBuffering(true)}
-          onPlaying={() => setIsBuffering(false)}
-          onError={(e) => {
-            console.warn("Audio element error:", e);
-            setIsBuffering(false);
-            setIsPlaying(false);
-            
-            // Prevent infinite skip loops during global YouTube decipher outages
-            window._auraConsecutiveErrors = (window._auraConsecutiveErrors || 0) + 1;
-            
-            if (window._auraConsecutiveErrors > 3) {
-              console.error("Multiple stream failures detected. YouTube proxy APIs are likely down.");
-              if (typeof window !== "undefined" && navigator.onLine) {
-                // Show one non-blocking message if possible, or gracefully stop
-                const msg = document.createElement("div");
-                msg.textContent = "YouTube streaming is currently disrupted globally. Playback unavailable.";
-                msg.style.cssText = "position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(255,0,0,0.8);color:white;padding:12px 24px;border-radius:20px;z-index:99999;font-size:14px;box-shadow:0 10px 20px rgba(0,0,0,0.5);";
-                document.body.appendChild(msg);
-                setTimeout(() => msg.remove(), 4000);
+          onSeeked={syncPositionState}
+          onTimeUpdate={(e) => {
+            const a = e.currentTarget;
+            const t = a.currentTime || 0;
+            setProgress(t);
+            if (Number.isFinite(a.duration)) setDuration(a.duration);
+
+            // Count real listening time (seeks and stalls are excluded)
+            if (!a.paused && lastTickRef.current !== null) {
+              const delta = t - lastTickRef.current;
+              if (delta > 0 && delta < 1.5) {
+                pendingListenRef.current += delta;
+                trackListenRef.current += delta;
               }
-              // Reset and stop
-              window._auraConsecutiveErrors = 0;
-            } else {
-              // Try the next track
-              playNext(true);
+            }
+            lastTickRef.current = t;
+            if (pendingListenRef.current >= 15) flushListenStats();
+
+            const track = currentTrackRef.current;
+            if (track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && !a.src.startsWith('blob:')) {
+              trackListenRef.current = -Infinity; // once per play
+              autoCacheTrack(track);
             }
           }}
+          onWaiting={() => setIsBuffering(true)}
+          onError={handleAudioError}
         />
       )}
     </AudioContext.Provider>
@@ -936,13 +1095,15 @@ export const useAudioProgress = () => {
 
   useEffect(() => {
     if (!audioProgressEmitter) return;
-    
+    setProgressState(lastEmitted.progress);
+    setDurationState(lastEmitted.duration);
+
     const onProgress = (e) => setProgressState(e.detail);
     const onDuration = (e) => setDurationState(e.detail);
-    
+
     audioProgressEmitter.addEventListener('progress', onProgress);
     audioProgressEmitter.addEventListener('duration', onDuration);
-    
+
     return () => {
       audioProgressEmitter.removeEventListener('progress', onProgress);
       audioProgressEmitter.removeEventListener('duration', onDuration);

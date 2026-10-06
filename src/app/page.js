@@ -27,15 +27,25 @@ const POSITIONS = [
   { top: "64%", left: "52%" },
 ];
 
+// Taste-profile genres mapped onto existing category pages
+const GENRE_TO_CATEGORY = {
+  "Lofi/Chill": "chill",
+  "Hip-Hop": "hiphop",
+  "Electronic": "electronic",
+  "Rock": "rock",
+  "Tamil Hits": "tamil",
+  "Pop": "pop",
+};
+
 export default function Home() {
-  const { getUserTasteProfile } = useAudio();
+  const { getUserTasteProfile, playHistory } = useAudio();
   const [bubbles, setBubbles] = useState(INITIAL_BUBBLES);
   
   useEffect(() => {
-    // Adapt UI based on user taste profile
+    // Adapt UI based on user taste profile (stats is null until something has been played)
     const profile = getUserTasteProfile();
-    if (profile && profile.topGenre !== "Unknown") {
-      setBubbles(prev => prev.map(b => {
+    if (profile?.stats) {
+      setBubbles(INITIAL_BUBBLES.map(b => {
         if (b.id === "foryou") {
           // Change color based on mood
           const moodColor = profile.dominantMood === "Energetic" ? "#ff4500" :
@@ -46,13 +56,15 @@ export default function Home() {
             ...b,
             name: `${profile.dominantMood.toUpperCase()} MIX`,
             color: moodColor,
-            path: `/category/${profile.topGenre.toLowerCase().replace(/[^a-z0-9]/g, '')}`
+            path: `/category/${GENRE_TO_CATEGORY[profile.topGenre] || "foryou"}`
           };
         }
         return b;
       }));
+    } else {
+      setBubbles(INITIAL_BUBBLES);
     }
-  }, []);
+  }, [playHistory]);
 
   return (
     <div className={styles.container}>
@@ -65,7 +77,8 @@ export default function Home() {
             <Link
               key={bubble.id}
               href={bubble.path}
-              style={{ position: "absolute", top: pos.top, left: pos.left, textDecoration: "none" }}
+              // Clamp to the right edge so large bubbles are not clipped on narrow phones
+              style={{ position: "absolute", top: pos.top, left: `min(${pos.left}, calc(100% - ${bubble.size}px))`, textDecoration: "none" }}
             >
               <div
                 className={`${styles.bubble} ${isForYou ? styles.forYouBubble : ""}`}

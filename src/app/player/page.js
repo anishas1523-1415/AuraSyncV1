@@ -5,6 +5,7 @@ import styles from "./page.module.css";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
+import { shareOrCopy } from "@/lib/toast";
 
 export default function Player() {
   const router = useRouter();
@@ -16,7 +17,6 @@ export default function Player() {
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState("next");
-  const [isQueueSynced, setIsQueueSynced] = useState(false);
 
   const isLiked = currentTrack ? isTrackLiked(currentTrack.id) : false;
 
@@ -29,55 +29,19 @@ export default function Player() {
   const handleShareClick = async (e) => {
     e.stopPropagation();
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
-    if (typeof window !== "undefined") {
-      const shareUrl = `${window.location.origin}/player?track=${currentTrack.id}`;
-      if (navigator.share) {
-        navigator.share({
-          title: currentTrack.title,
-          text: `🎵 Vibe with me to "${currentTrack.title}" by ${currentTrack.artist} on AuraSynq!`,
-          url: shareUrl
-        }).catch(() => {});
-      } else if (navigator.clipboard && navigator.clipboard.writeText) {
-        try {
-          await navigator.clipboard.writeText(shareUrl);
-          alert("Song link copied to clipboard!");
-        } catch (err) {
-          alert("Share link: " + shareUrl);
-        }
-      } else {
-        alert("Share link: " + shareUrl);
-      }
-    }
+    // Title and artist ride along so the receiver sees the song instantly, without a lookup
+    const title = currentTrack.title?.split("|")[0].split("(")[0].trim() || "";
+    const shareUrl = `${window.location.origin}/player?track=${encodeURIComponent(currentTrack.id)}` +
+      `&t=${encodeURIComponent(title)}&a=${encodeURIComponent(currentTrack.artist || "")}`;
+    await shareOrCopy({
+      title: currentTrack.title,
+      text: `🎵 Vibe with me to "${title}" by ${currentTrack.artist} on AuraSynq!`,
+      url: shareUrl
+    }, "Song link copied to clipboard!");
   };
 
-  useEffect(() => {
-    async function checkQueueSync() {
-      if (queue.length === 0 || typeof window === "undefined" || !("caches" in window)) return;
-      try {
-        const cache = await caches.open("aurasynq_offline_audio");
-        let allCached = true;
-        let hasDirect = false;
-        for (const track of queue) {
-          const isDirectAudio = track.url && /\.mp3($|\?)/i.test(track.url);
-          if (isDirectAudio) {
-            hasDirect = true;
-            const matched = await cache.match(track.url);
-            if (!matched) {
-              allCached = false;
-              break;
-            }
-          }
-        }
-        setIsQueueSynced(hasDirect && allCached);
-      } catch (err) {
-        console.warn(err);
-      }
-    }
-    checkQueueSync();
-  }, [queue]);
-
-
   const lastClickTime = useRef(0);
+  const clickTimeout = useRef(null);
   const activeLineRef = useRef(null);
 
   // Motion values to track drag offset and drive rotation/badge opacities dynamically
@@ -124,8 +88,6 @@ export default function Player() {
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
-  const clickTimeout = useRef(null);
 
   const handleTap = (e) => {
     const now = Date.now();
@@ -213,35 +175,36 @@ export default function Player() {
     removeFromQueue(trackId);
   };
 
-  const percent = duration ? (progress / duration) * 100 : 0;
+  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const percent = hasDuration ? Math.min(100, (progress / duration) * 100) : 0;
 
   const cardVariants = {
     enter: (dir) => ({
       left: dir === "next" ? 300 : dir === "prev" ? -300 : 0,
-      rotate: dir === "next" ? 15 : dir === "prev" ? -15 : 0,
+      rotateZ: dir === "next" ? 15 : dir === "prev" ? -15 : 0,
       opacity: 0,
       scale: 0.92
     }),
     center: {
       left: 0,
-      rotate: 0,
+      rotateZ: 0,
       opacity: 1,
       scale: 1,
       transition: {
         left: { type: "spring", stiffness: 300, damping: 25 },
-        rotate: { type: "spring", stiffness: 300, damping: 25 },
+        rotateZ: { type: "spring", stiffness: 300, damping: 25 },
         opacity: { duration: 0.2 },
         scale: { duration: 0.2 }
       }
     },
     exit: (dir) => ({
       left: dir === "next" ? -400 : dir === "prev" ? 400 : 0,
-      rotate: dir === "next" ? -25 : dir === "prev" ? 25 : 0,
+      rotateZ: dir === "next" ? -25 : dir === "prev" ? 25 : 0,
       opacity: 0,
       scale: 0.92,
       transition: {
         left: { duration: 0.3, ease: "easeOut" },
-        rotate: { duration: 0.3, ease: "easeOut" },
+        rotateZ: { duration: 0.3, ease: "easeOut" },
         opacity: { duration: 0.2 },
         scale: { duration: 0.2 }
       }
@@ -345,7 +308,7 @@ export default function Player() {
                 <input 
                   type="range"
                   min="0"
-                  max={duration || 100}
+                  max={hasDuration ? duration : 100}
                   value={progress}
                   onChange={(e) => seekTo(parseFloat(e.target.value))}
                   className={styles.seekBar}
@@ -353,7 +316,7 @@ export default function Player() {
                     background: `linear-gradient(to right, var(--primary-color, #a855f7) ${percent}%, rgba(255, 255, 255, 0.2) ${percent}%)`
                   }}
                 />
-                <span className={styles.timeText}>{formatTime(duration)}</span>
+                <span className={styles.timeText}>{formatTime(hasDuration ? duration : 0)}</span>
               </div>
 
               <p className={styles.hint}>Swipe left/right to change • Double tap for lyrics</p>

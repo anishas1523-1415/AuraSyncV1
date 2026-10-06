@@ -6,6 +6,8 @@ import {
   PencilSimple, Users, UserPlus, Sparkle, PlusCircle, Check, DownloadSimple
 } from "@phosphor-icons/react";
 import styles from "./page.module.css";
+import { useUser } from "@/lib/clerk";
+import { toast, shareOrCopy } from "@/lib/toast";
 
 // Recommended songs to add to custom playlists
 const RECOMMENDATIONS = [
@@ -23,6 +25,7 @@ export default function Library() {
     addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
     playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist, downloadTrack
   } = useAudio();
+  const { user } = useUser();
 
   const [selectedPlaylistId, setSelectedPlaylistId] = useState(null); // null | "liked" | playlistId
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -85,7 +88,7 @@ export default function Library() {
     // Find recommendations not already in the playlist
     const available = RECOMMENDATIONS.filter(r => !activePlaylist.tracks.some(t => t.id === r.id));
     if (available.length === 0) {
-      alert("All collaborative suggestions have already been added!");
+      toast("All collaborative suggestions have already been added!");
       return;
     }
     
@@ -102,21 +105,17 @@ export default function Library() {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate([40, 50, 40]);
     }
-    alert(`${friend} added a track: "${randomTrack.title}"!`);
+    toast(`${friend} added a track: "${randomTrack.title}"!`, { variant: "success" });
   };
 
   const handleInviteFriend = () => {
-    const inviteUrl = `${window.location.origin}/invite-blend?playlist=${selectedPlaylistId}`;
-    if (navigator.share) {
-      navigator.share({
-        title: "Collaborate on AuraSynq",
-        text: `Hey, join my collaborative playlist "${activePlaylist.name}" on AuraSynq!`,
-        url: inviteUrl
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(inviteUrl);
-      alert("Collaborative invite link copied to clipboard!");
-    }
+    // AppShell handles ?playlist= on any route; /invite-blend never existed (404)
+    const inviteUrl = `${window.location.origin}/library?playlist=${encodeURIComponent(selectedPlaylistId)}`;
+    shareOrCopy({
+      title: "Collaborate on AuraSynq",
+      text: `Hey, join my collaborative playlist "${activePlaylist.name}" on AuraSynq!`,
+      url: inviteUrl
+    }, "Collaborative invite link copied to clipboard!");
   };
 
   const playPlaylist = () => {
@@ -133,22 +132,19 @@ export default function Library() {
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([60, 40, 60]);
     
     try {
+      // YouTube songs download through the same-origin stream proxy, so every track can sync now
       let syncCount = 0;
-      let directCount = 0;
       for (const track of activePlaylist.tracks) {
-        const isDirect = track.url && /\.mp3($|\?)/i.test(track.url);
-        if (isDirect) {
-          directCount++;
-          const success = await downloadTrack(track);
-          if (success) syncCount++;
-        }
+        if (await downloadTrack(track)) syncCount++;
       }
       if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(100);
-      if (directCount === 0) {
-        alert("AuraSynq offline sync is only available for MP3 audio streams. YouTube video streams cannot be cached.");
-      } else {
-        alert(`Successfully synced ${syncCount} of ${directCount} tracks from "${activePlaylist.name}" offline!`);
-      }
+      const total = activePlaylist.tracks.length;
+      toast(
+        syncCount === total
+          ? `Synced all ${total} tracks from "${activePlaylist.name}" for offline listening!`
+          : `Synced ${syncCount} of ${total} tracks from "${activePlaylist.name}" offline`,
+        { variant: syncCount ? "success" : "error" }
+      );
     } catch (err) {
       console.warn(err);
     } finally {
@@ -373,7 +369,7 @@ export default function Library() {
     <div className={styles.container}>
       <header className={styles.header}>
         <div className={styles.topRow}>
-          <img src="https://i.pravatar.cc/150?u=aurasynq_avatar" alt="Profile" className={styles.thumb}/>
+          <img src={user?.imageUrl || "/icon-192x192.png"} alt="Profile" className={styles.thumb}/>
           <h1>Your Library</h1>
           <button className={styles.addBtn} onClick={() => setShowCreateModal(true)} title="Create Playlist">
             <Plus size={24}/>

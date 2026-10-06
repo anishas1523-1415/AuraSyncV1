@@ -39,6 +39,11 @@ export default function Society() {
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
 
+  // Lets a hosting session broadcast which song is playing, not just the progress
+  useEffect(() => {
+    syncEngine.updateNowPlaying({ trackId: currentTrack?.id || null, isPlaying });
+  }, [currentTrack?.id, isPlaying]);
+
   // Join Room
   useEffect(() => {
     const userId = user?.id || `anon_${Math.floor(Math.random()*1000)}`;
@@ -77,6 +82,10 @@ export default function Society() {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(15);
     }
+    // Ask for notification permission from a real tap; browsers block or penalize prompts on page load
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
     const burst = { id: Date.now(), emoji: reaction.emoji };
     setReactionBurst(prev => [...prev, burst]);
     setTimeout(() => {
@@ -97,14 +106,8 @@ export default function Society() {
     }
   }, [messages]);
 
-  // Request notifications permission on mount and setup mock friends activity
+  // Setup mock friends activity
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      if (Notification.permission === "default") {
-        Notification.requestPermission();
-      }
-    }
-
     const interval = setInterval(() => {
       const isReaction = Math.random() > 0.4;
       const onlineFriends = MOCK_FRIENDS.filter(f => f.online);

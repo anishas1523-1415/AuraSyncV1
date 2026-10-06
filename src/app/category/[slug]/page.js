@@ -1,6 +1,6 @@
 "use client";
 import styles from "./page.module.css";
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { Play, ArrowLeft, Pause, MusicNote, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
@@ -37,7 +37,7 @@ const CATEGORY_MAP = {
   focus:      { title: "Focus Mode",          query: "focus study instrumental music",    color: "#4776E6", emoji: "🎯" },
   workout:    { title: "Workout Beast",        query: "workout gym motivation songs",      color: "#FF4500", emoji: "💪" },
   sleep:      { title: "Sleep Sounds",         query: "sleep music calming relaxation",    color: "#483D8B", emoji: "🌙" },
-  pop:        { title: "Pop Hits",             query: "top pop songs 2024",               color: "#FF416C", emoji: "⭐" },
+  pop:        { title: "Pop Hits",             query: `top pop songs ${new Date().getFullYear()}`,               color: "#FF416C", emoji: "⭐" },
   hiphop:     { title: "Hip-Hop",             query: "hip hop rap songs",                color: "#8E54E9", emoji: "🎤" },
   indie:      { title: "Indie Picks",          query: "indie alternative music",          color: "#FF8008", emoji: "🎸" },
   electronic: { title: "Electronic",          query: "electronic edm music",             color: "#b224ef", emoji: "⚡" },
@@ -47,7 +47,8 @@ const CATEGORY_MAP = {
 };
 
 export default function CategoryPage({ params }) {
-  const { slug } = use(params);
+  // Next 14: params is a plain object (React's use() throws on non-promises)
+  const slug = params?.slug;
   const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
