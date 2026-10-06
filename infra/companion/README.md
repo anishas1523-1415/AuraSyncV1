@@ -28,8 +28,9 @@ phone ──/api/stream──▶ AuraSynq (Vercel) ──302 + signed check─�
 
 YouTube trusts residential IPs far more than datacenter IPs.
 
-- **Home PC / Raspberry Pi + Cloudflare Tunnel (recommended to start):** free, residential IP, no
-  open ports. The machine must stay on.
+- **Home PC / Raspberry Pi + Cloudflare Tunnel or Tailscale Funnel (recommended to start):** free,
+  residential IP, no open ports. The machine must stay on. For Windows without Docker, follow
+  **[HOME-PC-SETUP.md](HOME-PC-SETUP.md)**.
 - **Small VPS:** always on, but YouTube may flag datacenter IPs. If it does, set `PROXY` in
   `docker-compose.yml` or use the companion's IPv6 rotation.
 
