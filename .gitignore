@@ -56,3 +56,6 @@ next-env.d.ts
 
 # youtubei.js player script dumps produced while debugging the stream route
 *-player-script.js
+
+# Real companion secrets (the .env.example template stays tracked)
+infra/companion/.env

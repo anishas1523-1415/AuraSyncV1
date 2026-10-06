@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createCipheriv } from 'node:crypto';
 import { Innertube, Platform, UniversalCache } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
@@ -114,6 +115,25 @@ async function proxyAudio(entry, request) {
   return new Response(upstream.body, { status: upstream.status, headers });
 }
 
+// AAC 128kbps audio-only format, playable by every browser's <audio>
+const COMPANION_AUDIO_ITAG = '140';
+
+// Mirrors invidious-companion's verifyRequest: base64url(AES-128-ECB("<unix ts>|<videoId>"))
+// keyed with its SERVER_SECRET_KEY, so only AuraSynq can request audio from the companion.
+function companionCheckId(videoId, secret) {
+  const cipher = createCipheriv('aes-128-ecb', Buffer.from(secret, 'utf8'), null);
+  const payload = `${Math.round(Date.now() / 1000)}|${videoId}`;
+  const encrypted = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
+  return encrypted.toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function companionParams(videoId) {
+  const params = new URLSearchParams({ id: videoId, itag: COMPANION_AUDIO_ITAG, local: 'true' });
+  const secret = process.env.AURASYNQ_COMPANION_SECRET;
+  if (secret) params.set('check', companionCheckId(videoId, secret));
+  return params.toString();
+}
+
 async function pipedFallback(id) {
   const res = await fetch(`https://pipedapi.kavin.rocks/streams/${id}`, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) return null;
@@ -131,12 +151,17 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Missing or invalid track ID' }, { status: 400 });
   }
 
-  // Optional self-hosted Invidious (with its PO-token helper). `local=true` makes the instance
-  // proxy the audio itself, so the redirect is not IP-locked and supports seeking.
-  const invidiousBase = process.env.AURASYNQ_INVIDIOUS_URL?.replace(/\/+$/, '');
-  if (invidiousBase) {
-    if (searchParams.has('warm')) return new Response(null, { status: 204 });
-    return NextResponse.redirect(`${invidiousBase}/latest_version?id=${id}&itag=140&local=true`);
+  // Self-hosted invidious-companion (see infra/companion). It mints PO tokens and proxies the
+  // audio itself (`local=true`), so the redirect is neither IP-locked nor capped, and seeking works.
+  const companionBase = process.env.AURASYNQ_COMPANION_URL?.replace(/\/+$/, '');
+  if (companionBase) {
+    const companionUrl = `${companionBase}/latest_version?${companionParams(id)}`;
+    if (searchParams.has('warm')) {
+      // Resolving now caches the player response on the companion; don't follow into the audio
+      await fetch(companionUrl, { redirect: 'manual', signal: AbortSignal.timeout(15000) }).catch(() => {});
+      return new Response(null, { status: 204 });
+    }
+    return NextResponse.redirect(companionUrl);
   }
 
   // Prefetch mode: resolve and cache the URL so the next track starts instantly

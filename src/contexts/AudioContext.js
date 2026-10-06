@@ -102,6 +102,21 @@ const extractId = (t) => {
 };
 
 const streamKey = (id) => `/api/stream?id=${id}`;
+
+// Downloads a whole song for the Cache API. `Range: bytes=0-` takes the fast chunked path
+// (plain GETs crawl on invidious-companion), and the result is re-wrapped as a 200 because
+// cache.put() rejects partial (206) responses.
+const fetchAudioForCache = async (url) => {
+  const res = await fetch(url, { headers: { Range: "bytes=0-" } });
+  if (res.status !== 200 && res.status !== 206) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const total = Number(res.headers.get("content-range")?.split("/")[1]);
+  if (total && blob.size < total) throw new Error("Incomplete download");
+  return new Response(blob, {
+    status: 200,
+    headers: { "content-type": res.headers.get("content-type") || blob.type || "audio/mp4" }
+  });
+};
 const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
 const cleanArtistName = (artist = "") => artist.replace(/\s*-\s*Topic$/i, "").replace(/VEVO$/i, "").trim();
 
@@ -746,9 +761,7 @@ export function AudioProvider({ children }) {
     cachedIdsRef.current.add(trackId);
     try {
       const cache = await caches.open(AUDIO_CACHE);
-      const response = await fetch(streamKey(trackId));
-      if (response.status !== 200) throw new Error(`HTTP ${response.status}`);
-      await cache.put(streamKey(trackId), response);
+      await cache.put(streamKey(trackId), await fetchAudioForCache(streamKey(trackId)));
 
       // Keep only the most recent auto-cached songs; explicit downloads are never evicted
       const downloaded = new Set(readStored(DOWNLOADS_KEY).map(t => extractId(t)));
@@ -845,9 +858,7 @@ export function AudioProvider({ children }) {
     try {
       const cache = await caches.open(AUDIO_CACHE);
       if (!(await cache.match(key))) {
-        const res = await fetch(key);
-        if (res.status !== 200) return false;
-        await cache.put(key, res);
+        await cache.put(key, await fetchAudioForCache(key));
       }
       if (track.cover) {
         const imgRes = await fetch(track.cover, { mode: "no-cors" }).catch(() => null);

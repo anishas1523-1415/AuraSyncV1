@@ -1,0 +1,53 @@
+# invidious-companion: streams full YouTube audio for AuraSynq.
+# It mints YouTube PO tokens and proxies the audio itself, which gets past the ~1 MB cap that
+# YouTube applies to tokenless stream URLs. AuraSynq needs only this service; a full Invidious
+# instance and PostgreSQL are not required.
+#
+#   cp .env.example .env    # then fill in the values
+#   docker compose up -d                     # companion only (behind your own reverse proxy)
+#   docker compose --profile tunnel up -d    # companion + Cloudflare Tunnel (no open ports)
+
+services:
+  companion:
+    image: quay.io/invidious/invidious-companion:latest
+    restart: unless-stopped
+    environment:
+      # Shared with AuraSynq (AURASYNQ_COMPANION_SECRET) to sign each stream request
+      SERVER_SECRET_KEY: ${SERVER_SECRET_KEY:?Set SERVER_SECRET_KEY in .env (16 letters/digits)}
+      # Reject requests without a valid AuraSynq-signed check ID, so this is not an open proxy
+      SERVER_VERIFY_REQUESTS: "true"
+      HOST: 0.0.0.0
+      PORT: 8282
+      # YouTube throttles the default 5 MB chunks to ~250 kbps; 1 MB chunks measured ~14 Mbps
+      NETWORKING_VIDEOPLAYBACK_VIDEO_FETCH_CHUNK_SIZE_MB: 1
+      # Uncomment if YouTube starts blocking this server's IP (datacenter IPs get flagged first)
+      # PROXY: http://user:pass@proxy-host:port
+    ports:
+      # Reachable only from this machine; publish through a reverse proxy or the tunnel below
+      - "127.0.0.1:8282:8282"
+    volumes:
+      - companioncache:/var/tmp/youtubei.js:rw
+    logging:
+      options:
+        max-size: "50m"
+        max-file: "3"
+    cap_drop:
+      - ALL
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+  # Optional public HTTPS without opening router/firewall ports.
+  # In the Cloudflare dashboard, point the tunnel's public hostname at http://companion:8282
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - companion
+
+volumes:
+  companioncache:
