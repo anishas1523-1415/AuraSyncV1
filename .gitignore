@@ -50,3 +50,9 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# Any environment-specific local env file (e.g. .env.development.local) can hold secrets
+.env*.local
+
+# youtubei.js player script dumps produced while debugging the stream route
+*-player-script.js
