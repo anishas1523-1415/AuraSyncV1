@@ -108,6 +108,13 @@ export default function Player() {
     lastClickTime.current = now;
   };
 
+  // framer-motion's tap listens on the card element itself, so the buttons' React
+  // stopPropagation runs too late: taps on Like, Share or the seek bar also toggled playback.
+  const handleCardTap = (event) => {
+    if (event?.target?.closest?.("button, input, a")) return;
+    handleTap(event);
+  };
+
   const handleDragEnd = (event, info) => {
     const swipeThreshold = 80;
     const velocityThreshold = 400;
@@ -247,7 +254,7 @@ export default function Player() {
               dragConstraints={{ left: -400, right: 400 }}
               onDragEnd={handleDragEnd}
               style={{ x, rotate }}
-              onTap={handleTap}
+              onTap={handleCardTap}
             >
               {/* Share (Top Left) and Like (Top Right) absolute buttons inside card */}
               <button 

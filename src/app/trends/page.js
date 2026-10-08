@@ -8,7 +8,7 @@ import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 import { apiUrl } from "@/lib/api";
 
 export default function Trends() {
-  const { playTrack, setContextPlaylist } = useAudio();
+  const { playTrack, setContextPlaylist, prefetchTracks } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeModalTrack, setActiveModalTrack] = useState(null);
@@ -21,6 +21,7 @@ export default function Trends() {
         if (data.tracks) {
           const list = data.tracks.slice(0, 15);
           setTracks(list);
+          prefetchTracks(list);
         }
       } catch (e) {
         console.error(e);

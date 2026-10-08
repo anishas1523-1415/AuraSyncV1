@@ -60,6 +60,9 @@ try {
     if (existsSync(path)) move(path, join(ASIDE_ROOT, path));
   }
   rmSync("out", { recursive: true, force: true });
+  // Artifacts from a regular web build leak Clerk's server action into the export
+  // ("Server Actions are not supported with static export"). Restart `next dev` afterwards.
+  rmSync(".next", { recursive: true, force: true });
 
   console.log(`Building the mobile UI (API: ${SITE})...`);
   run("npx next build", {

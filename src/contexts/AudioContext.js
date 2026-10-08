@@ -49,6 +49,11 @@ const HISTORY_LIMIT = 50;
 const AUTO_CACHE_LIMIT = 25;          // recently played songs kept for offline replay
 const AUTO_CACHE_AFTER_SECONDS = 30;  // only cache songs that were actually listened to
 const RADIO_BATCH = 8;
+const WARM_AHEAD = 2;                 // upcoming queue songs resolved ahead of time
+const WARM_LIST_TOP = 2;              // top songs of a freshly opened list
+const FIRST_BUFFER_TIMEOUT_MS = 30000; // a cold song can take a while to resolve
+const STALL_TIMEOUT_MS = 15000;       // mid-song stall before reconnecting
+const MAX_STREAM_RECOVERIES = 2;
 const DEFAULT_STATS = { totalSeconds: 0, trackPlays: 0 };
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -243,6 +248,8 @@ export function AudioProvider({ children }) {
   const blobUrlRef = useRef(null);
   const unlockedRef = useRef(false);        // audio element has played after a user gesture (iOS)
   const consecutiveErrorsRef = useRef(0);
+  const recoveryRef = useRef({ trackId: null, attempts: 0, resumeAt: 0 });
+  const stallTimerRef = useRef(null);
   const cachedIdsRef = useRef(new Set());   // songs available offline (downloads + auto-cache)
   const warmedIdsRef = useRef(new Set());
   const radioPendingRef = useRef(null);
@@ -501,6 +508,7 @@ export function AudioProvider({ children }) {
   };
 
   const stopAudio = () => {
+    clearStallTimer();
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
@@ -544,6 +552,8 @@ export function AudioProvider({ children }) {
     }
 
     flushListenStats();
+    clearStallTimer();
+    recoveryRef.current = { trackId: null, attempts: 0, resumeAt: 0 };
     trackListenRef.current = 0;
     lastTickRef.current = null;
 
@@ -566,7 +576,12 @@ export function AudioProvider({ children }) {
     const startNetwork = (src) => {
       audio.src = src;
       audio.currentTime = 0;
-      if (shouldAutoPlay) safePlay(); else setIsBuffering(false);
+      if (shouldAutoPlay) {
+        safePlay();
+        startStallWatch();
+      } else {
+        setIsBuffering(false);
+      }
     };
 
     // Cached songs play from the device once the element is unlocked (saves data, works offline).
@@ -744,15 +759,24 @@ export function AudioProvider({ children }) {
 
   // ─── Prefetch & offline cache ────────────────────────────
 
-  // Resolve the next song's stream on the server ahead of time so skipping feels instant
+  const warmTrack = (track) => {
+    const id = extractId(track);
+    if (!id || !YOUTUBE_ID.test(id) || warmedIdsRef.current.has(id)) return;
+    warmedIdsRef.current.add(id);
+    fetch(`${streamKey(id)}&warm=1`).catch(() => warmedIdsRef.current.delete(id));
+  };
+
+  // Resolve upcoming songs on the server ahead of time so skipping feels instant
   const warmNextTrack = () => {
     const currentQ = queueRef.current;
     const index = currentQ.findIndex(t => t.id === currentTrackRef.current?.id);
-    const next = index !== -1 ? currentQ[index + 1] : null;
-    const nextId = extractId(next);
-    if (!nextId || !YOUTUBE_ID.test(nextId) || warmedIdsRef.current.has(nextId)) return;
-    warmedIdsRef.current.add(nextId);
-    fetch(`${streamKey(nextId)}&warm=1`).catch(() => {});
+    if (index === -1) return;
+    currentQ.slice(index + 1, index + 1 + WARM_AHEAD).forEach(warmTrack);
+  };
+
+  // Lists (categories, Discover, Trends) pre-resolve the songs most likely to be tapped first
+  const prefetchTracks = (tracks, count = WARM_LIST_TOP) => {
+    (tracks || []).slice(0, count).forEach(warmTrack);
   };
 
   const autoCacheTrack = async (track) => {
@@ -994,14 +1018,59 @@ export function AudioProvider({ children }) {
 
   // ─── Audio element events ────────────────────────────────
 
+  const clearStallTimer = () => {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+  };
+
+  // Re-open a dropped stream and continue from where it stopped, instead of skipping the song
+  const recoverStream = () => {
+    const audio = audioRef.current;
+    const track = currentTrackRef.current;
+    const src = audio?.getAttribute('src');
+    if (!audio || !track || !src) return false;
+    const previous = recoveryRef.current.trackId === track.id ? recoveryRef.current.attempts : 0;
+    if (previous >= MAX_STREAM_RECOVERIES) return false;
+    const resumeAt = audio.currentTime || 0;
+    recoveryRef.current = { trackId: track.id, attempts: previous + 1, resumeAt };
+    audio.addEventListener('loadedmetadata', () => {
+      if (resumeAt > 1) {
+        try { audio.currentTime = resumeAt; } catch (e) {}
+      }
+    }, { once: true });
+    audio.src = src;
+    setIsBuffering(true);
+    safePlay();
+    return true;
+  };
+
+  // A "Streaming..." that never ends: the connection stalled without an error event
+  const startStallWatch = () => {
+    const audio = audioRef.current;
+    if (!audio || stallTimerRef.current) return;
+    const limit = (audio.currentTime || 0) < 1 ? FIRST_BUFFER_TIMEOUT_MS : STALL_TIMEOUT_MS;
+    stallTimerRef.current = setTimeout(() => {
+      stallTimerRef.current = null;
+      const a = audioRef.current;
+      if (!a || a.paused || !currentTrackRef.current || a.readyState >= 3) return;
+      if (recoverStream()) {
+        toast("Weak connection — reconnecting…");
+        startStallWatch();
+      } else {
+        handleStreamFailure();
+      }
+    }, limit);
+  };
+
   const handleAudioError = () => {
     const audio = audioRef.current;
     const track = currentTrackRef.current;
     // Ignore errors from an intentionally emptied element
     if (!audio || !track || !audio.getAttribute('src')) return;
     console.warn("Audio element error:", audio.error);
-    setIsBuffering(false);
-    setIsPlaying(false);
+    clearStallTimer();
 
     // Streaming failed but the song is saved on this device: play that copy instead
     const trackId = extractId(track);
@@ -1009,6 +1078,20 @@ export function AudioProvider({ children }) {
       playFromCache(track, trackId, true);
       return;
     }
+
+    // A dropped connection: reconnect and resume before giving up on the song
+    if (recoverStream()) {
+      startStallWatch();
+      return;
+    }
+    handleStreamFailure();
+  };
+
+  const handleStreamFailure = () => {
+    const track = currentTrackRef.current;
+    if (!track) return;
+    setIsBuffering(false);
+    setIsPlaying(false);
 
     // Prevent infinite skip loops during global YouTube outages
     consecutiveErrorsRef.current += 1;
@@ -1035,7 +1118,7 @@ export function AudioProvider({ children }) {
       contextPlaylist, setContextPlaylist,
       downloadTrack, deleteDownloadedTrack,
       sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, openSharedTrack, playSharedTrack,
-      getUserTasteProfile, listenStats
+      getUserTasteProfile, listenStats, prefetchTracks
     }}>
       {children}
       {/* Always mounted: the very first tap must find an element to load and play synchronously */}
@@ -1049,16 +1132,19 @@ export function AudioProvider({ children }) {
             syncPositionState();
           }}
           onPlaying={() => {
+            clearStallTimer();
             setIsBuffering(false);
             consecutiveErrorsRef.current = 0;
             warmNextTrack();
           }}
           onPause={() => {
+            clearStallTimer();
             setIsPlaying(false);
             flushListenStats();
             syncPositionState();
           }}
           onEnded={() => {
+            clearStallTimer();
             setIsPlaying(false);
             setProgress(0);
             playNext(true);
@@ -1084,6 +1170,10 @@ export function AudioProvider({ children }) {
             }
             lastTickRef.current = t;
             if (pendingListenRef.current >= 15) flushListenStats();
+            // Playing smoothly again after a reconnect: allow future recoveries
+            if (recoveryRef.current.attempts && t > recoveryRef.current.resumeAt + 10) {
+              recoveryRef.current.attempts = 0;
+            }
 
             const track = currentTrackRef.current;
             if (track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && !a.src.startsWith('blob:')) {
@@ -1091,7 +1181,10 @@ export function AudioProvider({ children }) {
               autoCacheTrack(track);
             }
           }}
-          onWaiting={() => setIsBuffering(true)}
+          onWaiting={() => {
+            setIsBuffering(true);
+            startStallWatch();
+          }}
           onError={handleAudioError}
         />
       )}

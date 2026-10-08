@@ -17,6 +17,18 @@ const UPSTASH_COOLDOWN_MS = 5 * 60 * 1000;
 const SUPABASE_TIMEOUT_MS = 1500;
 let upstashDownUntil = 0;
 
+// Lists should be songs: hour-long mixes and live streams load slowly and aren't what a
+// category or a song search wants, unless the query explicitly asks for them.
+const MAX_SONG_SECONDS = 15 * 60;
+const LONG_FORM_QUERY = /\b(mix|mixes|jukebox|non ?stop|hours?|hrs?|full album|playlist|live|medley|mashup)\b/i;
+
+// "4:13" / "1:01:33" -> seconds (0 when unknown)
+const parseDuration = (text) => {
+  const parts = String(text || '').split(':').map(Number);
+  if (!text || parts.some(Number.isNaN)) return 0;
+  return parts.reduce((total, part) => total * 60 + part, 0);
+};
+
 const INVIDIOUS_INSTANCES = [
   "https://vid.puffyan.us",
   "https://invidious.jing.rocks",
@@ -111,7 +123,9 @@ async function searchYouTube(query) {
     videoId: item.id,
     title: item.title,
     author: item.channelTitle || 'Unknown Artist',
-    videoThumbnails: [{ url: item.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg` }]
+    videoThumbnails: [{ url: item.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg` }],
+    durationSeconds: parseDuration(item.length?.simpleText),
+    isLive: !!item.isLive
   }));
 }
 
@@ -122,7 +136,7 @@ async function searchInvidious(instance, query) {
   if (!response.ok) throw new Error(`${instance}: HTTP ${response.status}`);
   const results = await response.json();
   if (!Array.isArray(results) || !results.length) throw new Error(`${instance}: no results`);
-  return results;
+  return results.map(item => ({ ...item, durationSeconds: item.lengthSeconds || 0, isLive: !!item.liveNow }));
 }
 
 // Race every source: the first non-empty answer wins, so dead mirrors no longer add their timeouts
@@ -190,7 +204,11 @@ export async function GET(request) {
   }
 
   try {
-    const results = await searchAllSources(query);
+    const allResults = await searchAllSources(query);
+    const wantsLongForm = LONG_FORM_QUERY.test(query);
+    const results = wantsLongForm
+      ? allResults
+      : allResults.filter(item => !item.isLive && !(item.durationSeconds > MAX_SONG_SECONDS));
 
     if (!results || results.length === 0) {
       return NextResponse.json({ tracks: [] });
@@ -202,6 +220,7 @@ export async function GET(request) {
       artist: item.author || 'Unknown Artist',
       cover: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
       url: `https://www.youtube.com/watch?v=${item.videoId}`,
+      duration: item.durationSeconds || 0,
       mood: "energetic",
       hue: Math.floor(Math.random() * 360)
     }));

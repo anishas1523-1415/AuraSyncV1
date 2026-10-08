@@ -36,7 +36,7 @@ const getFavoriteArtist = () => {
 
 
 export default function CategoryClient({ slug }) {
-  const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist, prefetchTracks } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(null);
@@ -67,7 +67,11 @@ export default function CategoryClient({ slug }) {
 
         const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(searchQuery)}`));
         const data = await res.json();
-        if (data.tracks?.length) setTracks(data.tracks.slice(0, 20));
+        if (data.tracks?.length) {
+          const list = data.tracks.slice(0, 20);
+          setTracks(list);
+          prefetchTracks(list);
+        }
       } catch (e) {
         console.error(e);
       } finally {

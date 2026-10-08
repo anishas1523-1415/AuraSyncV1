@@ -41,7 +41,7 @@ const QUERIES = [
 ];
 
 export default function Discover() {
-  const { playTrack, currentTrack, isPlaying, togglePlay, toggleLikeTrack, isTrackLiked } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, toggleLikeTrack, isTrackLiked, prefetchTracks } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const loadedRef = useRef(false);
@@ -60,7 +60,9 @@ export default function Discover() {
         const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
         const data = await res.json();
         if (data.tracks?.length) {
-          setTracks(data.tracks.slice(0, 15));
+          const list = data.tracks.slice(0, 15);
+          setTracks(list);
+          prefetchTracks(list);
         }
       } catch (e) {
         console.error(e);
