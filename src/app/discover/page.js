@@ -4,6 +4,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { Heart, Share, Play, Pause } from "@phosphor-icons/react";
 import { useEffect, useState, useRef } from "react";
 import { shareOrCopy } from "@/lib/toast";
+import { apiUrl, siteUrl } from "@/lib/api";
 
 const getFavoriteArtist = () => {
   try {
@@ -56,7 +57,7 @@ export default function Discover() {
         if (favArtist) {
           query = `${query} ${favArtist}`;
         }
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
         const data = await res.json();
         if (data.tracks?.length) {
           setTracks(data.tracks.slice(0, 15));
@@ -81,7 +82,7 @@ export default function Discover() {
     shareOrCopy({
       title: track.title,
       text: `🎵 Listen to ${title} by ${track.artist} on AuraSynq!`,
-      url: `${window.location.origin}/player?track=${encodeURIComponent(track.id)}&t=${encodeURIComponent(title)}&a=${encodeURIComponent(track.artist || "")}`,
+      url: siteUrl(`/player?track=${encodeURIComponent(track.id)}&t=${encodeURIComponent(title)}&a=${encodeURIComponent(track.artist || "")}`),
     }, "Song link copied to clipboard!");
   };
 

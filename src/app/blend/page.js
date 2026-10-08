@@ -7,6 +7,7 @@ import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } 
 import Link from "next/link";
 import { supabase, isSupabaseActive } from "@/lib/supabase";
 import { shareOrCopy } from "@/lib/toast";
+import { apiUrl, siteUrl } from "@/lib/api";
 
 const FRIEND_PROFILES = [
   {
@@ -86,8 +87,8 @@ export default function Blend() {
 
     try {
       const [myRes, friendRes] = await Promise.all([
-        fetch(`/api/search?q=${encodeURIComponent(myQuery)}`),
-        fetch(`/api/search?q=${encodeURIComponent(inviter.query)}`),
+        fetch(apiUrl(`/api/search?q=${encodeURIComponent(myQuery)}`)),
+        fetch(apiUrl(`/api/search?q=${encodeURIComponent(inviter.query)}`)),
       ]);
       const myData = await myRes.json();
       const friendData = await friendRes.json();
@@ -148,7 +149,7 @@ export default function Blend() {
       if (error) console.warn("Failed to create blend session in Supabase:", error);
     }
 
-    const inviteUrl = `${window.location.origin}/blend?invite=${sessionUuid}`;
+    const inviteUrl = siteUrl(`/blend?invite=${sessionUuid}`);
     shareOrCopy({
       title: "Aura Blend on AuraSynq",
       text: `Vibe Check! Blend your music taste with mine on AuraSynq!`,
@@ -164,8 +165,8 @@ export default function Blend() {
     // Fetch tracks for both users' taste
     try {
       const [myRes, friendRes] = await Promise.all([
-        fetch(`/api/search?q=${encodeURIComponent(myQuery)}`),
-        fetch(`/api/search?q=${encodeURIComponent(selectedFriend.query)}`),
+        fetch(apiUrl(`/api/search?q=${encodeURIComponent(myQuery)}`)),
+        fetch(apiUrl(`/api/search?q=${encodeURIComponent(selectedFriend.query)}`)),
       ]);
       const myData = await myRes.json();
       const friendData = await friendRes.json();

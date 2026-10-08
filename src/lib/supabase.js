@@ -5,7 +5,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 let client = null;
 try {
-  if (supabaseUrl && supabaseAnonKey) {
+  if (supabaseUrl && supabaseAnonKey && process.env.NEXT_PUBLIC_APP_TARGET !== 'mobile') {
     client = createClient(supabaseUrl, supabaseAnonKey);
   }
 } catch (error) {

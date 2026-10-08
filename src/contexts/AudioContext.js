@@ -5,6 +5,7 @@ import {
   syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud, syncProfileToCloud, loadLibraryFromCloud
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
+import { apiUrl } from "@/lib/api";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
 // On the web it wraps navigator.mediaSession, so one adapter covers both.
@@ -101,7 +102,7 @@ const extractId = (t) => {
   return t.id || null;
 };
 
-const streamKey = (id) => `/api/stream?id=${id}`;
+const streamKey = (id) => apiUrl(`/api/stream?id=${id}`);
 
 // Downloads a whole song for the Cache API. `Range: bytes=0-` takes the fast chunked path
 // (plain GETs crawl on invidious-companion), and the result is re-wrapped as a 200 because
@@ -476,7 +477,7 @@ export function AudioProvider({ children }) {
 
     let lyricsLines = null;
     try {
-      const url = `/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
+      const url = apiUrl(`/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
       const res = await fetch(url, { signal });
       if (res.ok) {
         const data = await res.json();
@@ -594,7 +595,7 @@ export function AudioProvider({ children }) {
         const query = artist && artist !== "Unknown Artist"
           ? `${artist} best songs`
           : `${shortTitle(seed.title)} similar songs`;
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
         if (!res.ok) return [];
         const data = await res.json();
         const known = new Set([...queueRef.current, ...playHistoryRef.current].map(t => t.id));
@@ -915,7 +916,7 @@ export function AudioProvider({ children }) {
 
     // Older links carry only the id: look the metadata up
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(id)}`);
+      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(id)}`));
       const data = await res.json();
       const match = data.tracks?.find(t => t.id === id);
       if (match) setSharedTrackInfo(prev => (prev?.id === id ? { ...prev, ...match } : prev));

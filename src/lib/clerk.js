@@ -4,7 +4,11 @@ import { dark as RealDark } from "@clerk/themes";
 import { MockClerkProvider, mockUser, mockAuth, mockClerk, MockUserButton, MockSignIn, MockSignUp } from "./clerkMock";
 
 // Conditionally use real Clerk if API key is present in env, otherwise fallback to offline mock.
-const hasKey = typeof process !== "undefined" && !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+// The bundled mobile app always uses the local profile: Clerk's web sign-in flow (redirects and
+// cookies on https://localhost) hangs inside the Android WebView.
+const hasKey = typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_APP_TARGET !== "mobile" &&
+  !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 export const ClerkProvider = hasKey ? RealClerk.ClerkProvider : MockClerkProvider;
 export const useUser = hasKey ? RealClerk.useUser : () => mockUser;

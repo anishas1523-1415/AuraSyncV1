@@ -6,6 +6,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "
 import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { shareOrCopy } from "@/lib/toast";
+import { siteUrl } from "@/lib/api";
 
 export default function Player() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export default function Player() {
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
     // Title and artist ride along so the receiver sees the song instantly, without a lookup
     const title = currentTrack.title?.split("|")[0].split("(")[0].trim() || "";
-    const shareUrl = `${window.location.origin}/player?track=${encodeURIComponent(currentTrack.id)}` +
+    const shareUrl = siteUrl(`/player?track=${encodeURIComponent(currentTrack.id)}`) +
       `&t=${encodeURIComponent(title)}&a=${encodeURIComponent(currentTrack.artist || "")}`;
     await shareOrCopy({
       title: currentTrack.title,

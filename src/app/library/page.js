@@ -8,6 +8,7 @@ import {
 import styles from "./page.module.css";
 import { useUser } from "@/lib/clerk";
 import { toast, shareOrCopy } from "@/lib/toast";
+import { siteUrl } from "@/lib/api";
 
 // Recommended songs to add to custom playlists
 const RECOMMENDATIONS = [
@@ -110,7 +111,7 @@ export default function Library() {
 
   const handleInviteFriend = () => {
     // AppShell handles ?playlist= on any route; /invite-blend never existed (404)
-    const inviteUrl = `${window.location.origin}/library?playlist=${encodeURIComponent(selectedPlaylistId)}`;
+    const inviteUrl = siteUrl(`/library?playlist=${encodeURIComponent(selectedPlaylistId)}`);
     shareOrCopy({
       title: "Collaborate on AuraSynq",
       text: `Hey, join my collaborative playlist "${activePlaylist.name}" on AuraSynq!`,

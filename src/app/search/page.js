@@ -6,6 +6,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 import { toast } from "@/lib/toast";
+import { apiUrl } from "@/lib/api";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 
@@ -65,7 +66,7 @@ export default function Search() {
     lastSearchedRef.current = q;
     setLoading(true);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`));
       if (requestId !== requestIdRef.current) return;
       if (res.status === 429) {
         toast("Searching too fast — take a breath and try again", { variant: "error" });

@@ -5,6 +5,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { Play, ArrowLeft, MusicNotes, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
+import { apiUrl } from "@/lib/api";
 
 export default function Trends() {
   const { playTrack, setContextPlaylist } = useAudio();
@@ -15,7 +16,7 @@ export default function Trends() {
   useEffect(() => {
     async function fetchTamilSongs() {
       try {
-        const res = await fetch("/api/search?q=latest+tamil+hit+songs");
+        const res = await fetch(apiUrl("/api/search?q=latest+tamil+hit+songs"));
         const data = await res.json();
         if (data.tracks) {
           const list = data.tracks.slice(0, 15);

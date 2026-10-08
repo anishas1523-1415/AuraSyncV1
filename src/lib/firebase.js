@@ -12,9 +12,11 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase only if the config is valid and it hasn't been initialized yet
+// Initialize Firebase only if the config is valid and it hasn't been initialized yet.
+// Off in the mobile app: its local profile has no real user id to sync under.
+const enabled = !!firebaseConfig.apiKey && process.env.NEXT_PUBLIC_APP_TARGET !== "mobile";
 const app = getApps().length > 0 ? getApp() : (
-  firebaseConfig.apiKey ? initializeApp(firebaseConfig) : null
+  enabled ? initializeApp(firebaseConfig) : null
 );
 
 export const db = app ? getFirestore(app) : null;

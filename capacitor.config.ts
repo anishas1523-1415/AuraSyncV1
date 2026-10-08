@@ -1,26 +1,20 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-// The app is a native shell around the deployed web app (it needs the Next.js API routes,
-// so there is no static export). Point a dev build at a local server with e.g.
+// The UI ships inside the app (`npm run build:mobile` exports it to ./out), so it opens
+// instantly like a native app; only search, lyrics and audio go over the network.
+// For live development against a running dev server instead:
 //   CAP_SERVER_URL=http://192.168.0.11:3000 npx cap sync android
-const serverUrl = process.env.CAP_SERVER_URL || 'https://aura-sync-v1.vercel.app';
-const isPlainHttp = serverUrl.startsWith('http://');
+const devServerUrl = process.env.CAP_SERVER_URL;
 
 const config: CapacitorConfig = {
   appId: 'com.aurasynq.app',
   appName: 'AuraSynq',
-  webDir: 'public',
-  server: {
-    url: serverUrl,
-    cleartext: isPlainHttp,
-    allowNavigation: [
-      'daring-grackle-57.clerk.accounts.dev',
-      '*.clerk.accounts.dev',
-      '*.clerk.com'
-    ]
-  },
+  webDir: 'out',
+  ...(devServerUrl
+    ? { server: { url: devServerUrl, cleartext: devServerUrl.startsWith('http://') } }
+    : {}),
   android: {
-    allowMixedContent: isPlainHttp
+    allowMixedContent: false
   }
 };
 

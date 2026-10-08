@@ -9,7 +9,7 @@ export const mockUser = {
     firstName: "Aura",
     lastName: "User",
     fullName: "Aura User",
-    imageUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80",
+    imageUrl: "/icon-192x192.png",
     createdAt: "2026-05-20T12:00:00.000Z",
     primaryEmailAddress: {
       emailAddress: "aurauser@aurasynq.app"
@@ -44,7 +44,7 @@ export function MockUserButton() {
         height: "42px",
         borderRadius: "50%",
         border: "2px solid rgba(255,255,255,0.12)",
-        backgroundImage: "url(https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80)",
+        backgroundImage: "url(/icon-192x192.png)",
         backgroundSize: "cover",
         backgroundPosition: "center",
         cursor: "pointer"
