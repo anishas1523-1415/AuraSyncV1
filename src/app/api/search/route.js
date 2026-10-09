@@ -156,6 +156,34 @@ async function searchAllSources(query) {
   }
 }
 
+const MIN_SONG_RESULTS = 5;
+const MAX_FALLBACK_SECONDS = 60 * 60;
+
+// No duration almost always means a live stream (24/7 "lofi beats" channels), which the search
+// library doesn't always flag as live; those can't be played as songs.
+const isSong = (item) => !item.isLive && item.durationSeconds > 0 && item.durationSeconds <= MAX_SONG_SECONDS;
+const isPlayableLong = (item) => !item.isLive && item.durationSeconds > 0 && item.durationSeconds <= MAX_FALLBACK_SECONDS;
+
+// Prefer individual songs. Mood searches ("lofi", "sleep") mostly return streams and hour-long
+// compilations, so when too few songs remain, search again for songs, then allow up to an hour.
+async function selectSongs(query, allResults) {
+  if (LONG_FORM_QUERY.test(query)) return allResults;
+
+  let songs = allResults.filter(isSong);
+  const addNew = (items, keep) => {
+    const seen = new Set(songs.map(song => song.videoId));
+    songs = songs.concat(items.filter(item => keep(item) && !seen.has(item.videoId)));
+  };
+
+  if (songs.length < MIN_SONG_RESULTS && !/\bsongs?\b/i.test(query)) {
+    addNew(await searchAllSources(`${query} songs`), isSong);
+  }
+  if (songs.length < MIN_SONG_RESULTS) {
+    addNew(allResults, isPlayableLong);
+  }
+  return songs;
+}
+
 export async function GET(request) {
   const ip = getClientIp(request);
   const now = Date.now();
@@ -204,13 +232,7 @@ export async function GET(request) {
   }
 
   try {
-    const allResults = await searchAllSources(query);
-    const wantsLongForm = LONG_FORM_QUERY.test(query);
-    const results = wantsLongForm
-      ? allResults
-      // No duration almost always means a live stream (24/7 "lofi beats" channels), which the
-      // search library doesn't always flag as live
-      : allResults.filter(item => !item.isLive && item.durationSeconds > 0 && item.durationSeconds <= MAX_SONG_SECONDS);
+    const results = await selectSongs(query, await searchAllSources(query));
 
     if (!results || results.length === 0) {
       return NextResponse.json({ tracks: [] });

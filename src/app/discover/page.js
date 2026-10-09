@@ -32,12 +32,13 @@ const getFavoriteArtist = () => {
   }
 };
 
+// Singular "... song" phrasing returns individual songs rather than hour-long compilations
 const QUERIES = [
-  `trending pop songs ${new Date().getFullYear()}`,
-  "latest electronic dance music",
-  "viral songs this week",
-  "chill indie hits",
-  "hip hop banger songs",
+  "pop song",
+  "electronic song",
+  "viral song",
+  "indie pop song",
+  "hip hop rap songs",
 ];
 
 export default function Discover() {
