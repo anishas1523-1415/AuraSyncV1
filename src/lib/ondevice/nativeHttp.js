@@ -47,7 +47,8 @@ export async function nativeFetch(input, init = {}) {
     body = new Uint8Array(await request.clone().arrayBuffer());
   }
 
-  const options = { url, method, headers, responseType: "text" };
+  // Explicit timeouts: a stalled mobile connection must fail instead of hanging forever
+  const options = { url, method, headers, responseType: "text", connectTimeout: 10000, readTimeout: 20000 };
   if (body != null) {
     if (typeof body === "string") {
       options.data = body;
@@ -74,7 +75,9 @@ export async function nativeFetch(input, init = {}) {
 
 // Binary download (the audio itself). Returns raw bytes plus the final URL after redirects.
 export async function nativeFetchBytes(url, { method = "GET", headers = {}, bodyBase64 } = {}) {
-  const options = { url, method, headers: { ...headers }, responseType: "arraybuffer" };
+  const options = {
+    url, method, headers: { ...headers }, responseType: "arraybuffer", connectTimeout: 10000, readTimeout: 20000,
+  };
   if (bodyBase64) {
     options.data = bodyBase64;
     options.dataType = "file";

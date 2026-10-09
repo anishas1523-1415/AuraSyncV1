@@ -13,6 +13,7 @@ Platform.load({ ...Platform.shim, eval: (data) => new Function(data.output)() })
 const CLIENTS = ["TV_SIMPLY", "WEB", "MWEB", "ANDROID_VR"];
 const AUDIO_ITAG = 140; // AAC 128 kbps, plays in every WebView
 const CHUNK_BYTES = 1024 * 1024; // larger chunks get throttled by YouTube
+const FIRST_CHUNK_BYTES = 256 * 1024; // ~16s of audio: enough to start playing right away
 const PARALLEL_CHUNKS = 4; // a typical 3-5 MB song downloads in one round
 const MAX_CACHED_SONGS = 4;
 const POST_BODY = "eAA="; // protobuf {15: 0}, what YouTube's own player sends
@@ -118,12 +119,35 @@ async function resolveAudio(videoId) {
   url = url.includes("alr=yes") ? url.replace("alr=yes", "alr=no") : `${url}&alr=no`;
   // 0 when YouTube doesn't state it; the download then reads chunks until the end
   const size = Number(new URL(url).searchParams.get("clen")) || Number(format.content_length) || 0;
-  return { url, size, mimeType: (format.mime_type || "audio/mp4").split(";")[0] };
+  const durationSec = Number(format.approx_duration_ms) / 1000 || Number(info.basic_info?.duration) || 0;
+  return {
+    url,
+    size,
+    durationSec,
+    // Full type with codecs, which MediaSource needs (e.g. audio/mp4; codecs="mp4a.40.2")
+    codecType: format.mime_type || 'audio/mp4; codecs="mp4a.40.2"',
+    mimeType: (format.mime_type || "audio/mp4").split(";")[0],
+  };
 }
 
 // ─── Download: POST + `range=` query parameter, in parallel chunks ───
 
-async function downloadAudio({ url, size, mimeType }) {
+// Byte ranges for a song; the first one is small so playback can start almost immediately
+function planRanges(size) {
+  const ranges = [[0, Math.min(FIRST_CHUNK_BYTES, size) - 1]];
+  for (let start = FIRST_CHUNK_BYTES; start < size; start += CHUNK_BYTES) {
+    ranges.push([start, Math.min(start + CHUNK_BYTES, size) - 1]);
+  }
+  return ranges;
+}
+
+// Downloads a song, handing each chunk to `onChunk` in order as soon as it (and every chunk
+// before it) has arrived. Resolves to the complete file.
+async function downloadAudio({ url, size, mimeType }, onChunk = () => {}) {
+  const deliver = (bytes) => {
+    try { onChunk(bytes); } catch (err) { console.warn("AuraSynq on-device: chunk consumer failed", err); }
+  };
+
   // Follow googlevideo's redirects once (POST bodies don't survive redirects)
   const head = await nativeFetchBytes(url, { method: "HEAD", headers: GOOGLEVIDEO_HEADERS });
   if (head.status === 403) throw new Error("YouTube refused the stream (403)");
@@ -144,17 +168,22 @@ async function downloadAudio({ url, size, mimeType }) {
         throw new Error(`Chunk ${index} failed with HTTP ${res.status}`);
       }
       parts.push(res.bytes);
+      deliver(res.bytes);
       if (res.bytes.length < CHUNK_BYTES) break;
     }
     return new Blob(parts, { type: mimeType });
   }
 
-  const ranges = [];
-  for (let start = 0; start < size; start += CHUNK_BYTES) {
-    ranges.push([start, Math.min(start + CHUNK_BYTES, size) - 1]);
-  }
+  const ranges = planRanges(size);
   const parts = new Array(ranges.length);
   let nextIndex = 0;
+  let nextToDeliver = 0;
+  const deliverReady = () => {
+    while (nextToDeliver < parts.length && parts[nextToDeliver]) {
+      deliver(parts[nextToDeliver]);
+      nextToDeliver++;
+    }
+  };
 
   const worker = async () => {
     while (nextIndex < ranges.length) {
@@ -165,6 +194,7 @@ async function downloadAudio({ url, size, mimeType }) {
         const res = await fetchChunk(from, to);
         if (res.status === 200 && res.bytes) {
           parts[index] = res.bytes;
+          deliverReady();
           break;
         }
         // One retry per chunk for flaky mobile connections; 403 means the token was rejected
@@ -178,22 +208,41 @@ async function downloadAudio({ url, size, mimeType }) {
   return new Blob(parts, { type: mimeType });
 }
 
-// ─── Public API: song blobs with a small in-memory cache ─────
+// ─── Public API: songs with a small in-memory cache ─────────
 
-const songs = new Map(); // videoId -> Promise<Blob>
+const songs = new Map(); // videoId -> Promise<Blob> (finished or still downloading)
 
-export function getTrackBlob(videoId) {
-  if (songs.has(videoId)) {
-    const cached = songs.get(videoId);
-    songs.delete(videoId); // refresh LRU position
-    songs.set(videoId, cached);
-    return cached;
-  }
-  const pending = resolveAudio(videoId).then(downloadAudio);
-  pending.catch(() => songs.delete(videoId));
+const remember = (videoId, pending) => {
+  pending.catch(() => { if (songs.get(videoId) === pending) songs.delete(videoId); });
   songs.set(videoId, pending);
   while (songs.size > MAX_CACHED_SONGS) songs.delete(songs.keys().next().value);
   return pending;
+};
+
+// A song that is already downloaded or downloading (prefetched or played before), else null
+export function peekTrack(videoId) {
+  const known = songs.get(videoId);
+  if (!known) return null;
+  songs.delete(videoId); // refresh LRU position
+  songs.set(videoId, known);
+  return known;
+}
+
+export function forgetTrack(videoId) {
+  songs.delete(videoId);
+}
+
+export function getTrackBlob(videoId) {
+  return peekTrack(videoId) || remember(videoId, resolveAudio(videoId).then((resolved) => downloadAudio(resolved)));
+}
+
+// Progressive playback: `onReady({ codecType, durationSec, size })` once the song is resolved,
+// then `onChunk(bytes)` in order. Resolves to the whole file, kept for replays and offline caching.
+export function streamTrack(videoId, { onReady, onChunk } = {}) {
+  return remember(videoId, resolveAudio(videoId).then((resolved) => {
+    onReady?.({ codecType: resolved.codecType, durationSec: resolved.durationSec, size: resolved.size });
+    return downloadAudio(resolved, onChunk);
+  }));
 }
 
 // Download a song that will probably play next, so the skip is instant
@@ -215,6 +264,18 @@ if (typeof window !== "undefined") {
       const started = Date.now();
       const blob = await getTrackBlob(videoId);
       return { bytes: blob.size, type: blob.type, ms: Date.now() - started };
+    },
+    async testProgressive(videoId) {
+      forgetTrack(videoId);
+      const started = Date.now();
+      let readyMs = 0;
+      let firstChunkMs = 0;
+      let chunks = 0;
+      const blob = await streamTrack(videoId, {
+        onReady: () => { readyMs = Date.now() - started; },
+        onChunk: () => { chunks++; if (!firstChunkMs) firstChunkMs = Date.now() - started; },
+      });
+      return { readyMs, firstChunkMs, chunks, totalMs: Date.now() - started, bytes: blob.size };
     },
   };
 }

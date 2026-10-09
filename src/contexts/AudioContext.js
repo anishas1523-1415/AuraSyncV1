@@ -127,7 +127,6 @@ const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
 const cleanArtistName = (artist = "") => artist.replace(/\s*-\s*Topic$/i, "").replace(/VEVO$/i, "").trim();
 
 // The Android app streams straight from YouTube on the phone (src/lib/ondevice), loaded on demand
-const ON_DEVICE_TIMEOUT_MS = 45000;
 let onDevicePromise = null;
 const loadOnDevice = () => {
   if (!isMobileApp || typeof window === "undefined") return Promise.resolve(null);
@@ -263,6 +262,8 @@ export function AudioProvider({ children }) {
 
   const blobUrlRef = useRef(null);
   const onDeviceBlobRef = useRef({ id: null, blob: null }); // song downloaded on the phone
+  const onDeviceDownloadRef = useRef({ id: null, promise: null }); // its download in progress
+  const mediaSourceUrlRef = useRef(null); // object URL of a progressive MediaSource
   const unlockedRef = useRef(false);        // audio element has played after a user gesture (iOS)
   const consecutiveErrorsRef = useRef(0);
   const recoveryRef = useRef({ trackId: null, attempts: 0, resumeAt: 0 });
@@ -528,6 +529,7 @@ export function AudioProvider({ children }) {
 
   const stopAudio = () => {
     clearStallTimer();
+    mediaSourceUrlRef.current = null;
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
@@ -603,29 +605,136 @@ export function AudioProvider({ children }) {
       }
     };
 
-    // Android app: the phone fetches the song from YouTube itself; the server is only a fallback
+    // Android app: the phone fetches the song from YouTube itself (no server involved)
+    const isCurrent = () => currentTrackRef.current?.id === track.id;
+
+    const playDownloadedFile = (blob) => {
+      if (!isCurrent()) return;
+      // Taking over from a progressive stream that failed: carry on from the same spot
+      const resumeAt = mediaSourceUrlRef.current ? audio.currentTime || 0 : 0;
+      onDeviceBlobRef.current = { id: trackId, blob };
+      mediaSourceUrlRef.current = null;
+      revokeBlobUrl();
+      blobUrlRef.current = URL.createObjectURL(blob);
+      if (resumeAt > 1) {
+        audio.addEventListener('loadedmetadata', () => {
+          try { audio.currentTime = resumeAt; } catch (e) {}
+        }, { once: true });
+      }
+      startNetwork(blobUrlRef.current);
+    };
+
+    // Problems in the player's buffer (not the download), so the downloaded file is still usable
+    const mediaSourceError = (message) => Object.assign(new Error(message), { fromMediaSource: true });
+
+    // Feed the song to the player chunk by chunk, so it starts after the first ~256 KB
+    // instead of after the whole download
+    const streamProgressively = (ondevice) => new Promise((resolve, reject) => {
+      const mediaSource = new MediaSource();
+      const pending = [];
+      let sourceBuffer = null;
+      let info = null;
+      let downloaded = false;
+
+      const pump = () => {
+        if (!sourceBuffer || sourceBuffer.updating || mediaSource.readyState !== "open") return;
+        if (pending.length) {
+          try {
+            sourceBuffer.appendBuffer(pending[0]);
+            pending.shift();
+          } catch (err) {
+            if (err.name !== "QuotaExceededError") {
+              reject(mediaSourceError(err.message));
+              return;
+            }
+            // Buffer full (a long song): drop what was already played, else wait for playback
+            const playedUpTo = audio.currentTime - 10;
+            const buffered = sourceBuffer.buffered;
+            if (playedUpTo > 0 && buffered.length && buffered.start(0) < playedUpTo) {
+              sourceBuffer.remove(0, playedUpTo);
+            } else {
+              audio.addEventListener("timeupdate", pump, { once: true });
+            }
+          }
+        } else if (downloaded) {
+          try { mediaSource.endOfStream(); } catch (e) {}
+        }
+      };
+      const attach = () => {
+        if (sourceBuffer || !info || mediaSource.readyState !== "open") return;
+        if (!MediaSource.isTypeSupported(info.codecType)) {
+          reject(mediaSourceError(`MediaSource can't play ${info.codecType}`));
+          return;
+        }
+        sourceBuffer = mediaSource.addSourceBuffer(info.codecType);
+        if (info.durationSec) {
+          try { mediaSource.duration = info.durationSec; } catch (e) {}
+        }
+        sourceBuffer.addEventListener("updateend", pump);
+        sourceBuffer.addEventListener("error", () => reject(mediaSourceError("MediaSource buffer error")));
+        pump();
+      };
+      mediaSource.addEventListener("sourceopen", attach, { once: true });
+
+      revokeBlobUrl();
+      blobUrlRef.current = URL.createObjectURL(mediaSource);
+      mediaSourceUrlRef.current = blobUrlRef.current;
+      audio.src = blobUrlRef.current;
+      if (shouldAutoPlay) {
+        safePlay();
+        startStallWatch();
+      } else {
+        setIsBuffering(false);
+      }
+
+      const download = ondevice.streamTrack(trackId, {
+        onReady: (resolved) => { info = resolved; attach(); },
+        onChunk: (bytes) => {
+          if (!isCurrent()) return;
+          pending.push(bytes);
+          pump();
+        },
+      });
+      onDeviceDownloadRef.current = { id: trackId, promise: download };
+      download.then((blob) => {
+        downloaded = true;
+        if (isCurrent()) onDeviceBlobRef.current = { id: trackId, blob };
+        pump();
+        resolve();
+      }, reject);
+    });
+
     const startOnDevice = () => {
       setIsBuffering(shouldAutoPlay);
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("on-device download timed out")), ON_DEVICE_TIMEOUT_MS));
-      Promise.race([
-        loadOnDevice().then((ondevice) => {
+      onDeviceBlobRef.current = { id: null, blob: null };
+      loadOnDevice()
+        .then((ondevice) => {
           if (!ondevice) throw new Error("on-device streaming unsupported");
-          return ondevice.getTrackBlob(trackId);
-        }),
-        timeout,
-      ])
-        .then((blob) => {
-          if (currentTrackRef.current?.id !== track.id) return;
-          onDeviceBlobRef.current = { id: trackId, blob };
-          revokeBlobUrl();
-          blobUrlRef.current = URL.createObjectURL(blob);
-          startNetwork(blobUrlRef.current);
+          // Prefetched or played before: start the (finished or nearly finished) file directly
+          const known = ondevice.peekTrack(trackId);
+          if (known || typeof MediaSource === "undefined") {
+            const download = known || ondevice.getTrackBlob(trackId);
+            onDeviceDownloadRef.current = { id: trackId, promise: download };
+            return download.then(playDownloadedFile);
+          }
+          return streamProgressively(ondevice).catch((err) => {
+            if (!isCurrent()) return;
+            console.warn("AuraSynq: progressive stream failed, falling back to the whole file", err);
+            // A buffer problem: the download is fine, so play it once finished.
+            // A failed download: one clean retry with a fresh URL and token before giving up.
+            let download = onDeviceDownloadRef.current.promise;
+            if (!err?.fromMediaSource || onDeviceDownloadRef.current.id !== trackId || !download) {
+              ondevice.forgetTrack(trackId);
+              download = ondevice.getTrackBlob(trackId);
+              onDeviceDownloadRef.current = { id: trackId, promise: download };
+            }
+            return download.then(playDownloadedFile);
+          });
         })
         .catch((err) => {
-          if (currentTrackRef.current?.id !== track.id) return;
-          console.warn("AuraSynq: on-device stream failed, using the server", err);
-          startNetwork(streamKey(trackId));
+          if (!isCurrent()) return;
+          console.warn("AuraSynq: on-device stream failed", err);
+          handleStreamFailure();
         });
     };
 
@@ -1092,6 +1201,31 @@ export function AudioProvider({ children }) {
     if (previous >= MAX_STREAM_RECOVERIES) return false;
     const resumeAt = audio.currentTime || 0;
     recoveryRef.current = { trackId: track.id, attempts: previous + 1, resumeAt };
+
+    // A MediaSource can't be attached twice: continue from the downloaded file instead
+    if (mediaSourceUrlRef.current && src === mediaSourceUrlRef.current) {
+      const download = onDeviceDownloadRef.current;
+      if (!download.promise || download.id !== extractId(track)) return false;
+      setIsBuffering(true);
+      // Failures are handled where the download started (it retries once, then skips)
+      download.promise.then((blob) => {
+        // Already switched over (by that retry, or an earlier recovery)
+        if (currentTrackRef.current?.id !== track.id || mediaSourceUrlRef.current !== src) return;
+        mediaSourceUrlRef.current = null;
+        onDeviceBlobRef.current = { id: download.id, blob };
+        revokeBlobUrl();
+        blobUrlRef.current = URL.createObjectURL(blob);
+        audio.addEventListener('loadedmetadata', () => {
+          if (resumeAt > 1) {
+            try { audio.currentTime = resumeAt; } catch (e) {}
+          }
+        }, { once: true });
+        audio.src = blobUrlRef.current;
+        safePlay();
+      }).catch(() => {});
+      return true;
+    }
+
     audio.addEventListener('loadedmetadata', () => {
       if (resumeAt > 1) {
         try { audio.currentTime = resumeAt; } catch (e) {}
@@ -1205,6 +1339,9 @@ export function AudioProvider({ children }) {
             setIsPlaying(false);
             setProgress(0);
             playNext(true);
+          }}
+          onDurationChange={(e) => {
+            if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
           }}
           onLoadedMetadata={(e) => {
             setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
