@@ -10,9 +10,16 @@ const config: CapacitorConfig = {
   appId: 'com.aurasynq.app',
   appName: 'AuraSynq',
   webDir: 'out',
-  ...(devServerUrl
-    ? { server: { url: devServerUrl, cleartext: devServerUrl.startsWith('http://') } }
-    : {}),
+  server: devServerUrl
+    ? { url: devServerUrl, cleartext: devServerUrl.startsWith('http://') }
+    : {
+        // On-device streaming runs YouTube's BotGuard check inside this WebView, and Google only
+        // issues PO tokens to pages on youtube.com (on https://localhost it refuses). The bundled
+        // UI is therefore served as https://www.youtube.com; real YouTube traffic goes through
+        // native HTTP, which this local hostname doesn't intercept.
+        hostname: 'www.youtube.com',
+        androidScheme: 'https',
+      },
   android: {
     allowMixedContent: false
   }

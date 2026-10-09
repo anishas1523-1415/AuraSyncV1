@@ -208,7 +208,9 @@ export async function GET(request) {
     const wantsLongForm = LONG_FORM_QUERY.test(query);
     const results = wantsLongForm
       ? allResults
-      : allResults.filter(item => !item.isLive && !(item.durationSeconds > MAX_SONG_SECONDS));
+      // No duration almost always means a live stream (24/7 "lofi beats" channels), which the
+      // search library doesn't always flag as live
+      : allResults.filter(item => !item.isLive && item.durationSeconds > 0 && item.durationSeconds <= MAX_SONG_SECONDS);
 
     if (!results || results.length === 0) {
       return NextResponse.json({ tracks: [] });

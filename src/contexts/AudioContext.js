@@ -5,7 +5,7 @@ import {
   syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud, syncProfileToCloud, loadLibraryFromCloud
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, isMobileApp } from "@/lib/api";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
 // On the web it wraps navigator.mediaSession, so one adapter covers both.
@@ -125,6 +125,22 @@ const fetchAudioForCache = async (url) => {
 };
 const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
 const cleanArtistName = (artist = "") => artist.replace(/\s*-\s*Topic$/i, "").replace(/VEVO$/i, "").trim();
+
+// The Android app streams straight from YouTube on the phone (src/lib/ondevice), loaded on demand
+const ON_DEVICE_TIMEOUT_MS = 45000;
+let onDevicePromise = null;
+const loadOnDevice = () => {
+  if (!isMobileApp || typeof window === "undefined") return Promise.resolve(null);
+  if (!onDevicePromise) {
+    onDevicePromise = import("@/lib/ondevice/stream")
+      .then((mod) => (mod.isOnDeviceSupported() ? mod : null))
+      .catch((err) => {
+        console.warn("AuraSynq: on-device streaming unavailable", err);
+        return null;
+      });
+  }
+  return onDevicePromise;
+};
 
 const shuffleAround = (list, first) => {
   const rest = list.filter(t => t.id !== first?.id);
@@ -246,6 +262,7 @@ export function AudioProvider({ children }) {
   const customPlaylistsRef = useRef([]);
 
   const blobUrlRef = useRef(null);
+  const onDeviceBlobRef = useRef({ id: null, blob: null }); // song downloaded on the phone
   const unlockedRef = useRef(false);        // audio element has played after a user gesture (iOS)
   const consecutiveErrorsRef = useRef(0);
   const recoveryRef = useRef({ trackId: null, attempts: 0, resumeAt: 0 });
@@ -296,6 +313,8 @@ export function AudioProvider({ children }) {
       ...readStored(AUTO_CACHE_KEY)
     ]);
     setLibraryReady(true);
+    // Start the phone's YouTube session (BotGuard) early so the first tap plays sooner
+    loadOnDevice().then((ondevice) => ondevice?.warmUp());
   }, []);
 
   useEffect(() => { if (libraryReady) writeStored(HISTORY_KEY, playHistory); }, [playHistory, libraryReady]);
@@ -584,16 +603,42 @@ export function AudioProvider({ children }) {
       }
     };
 
+    // Android app: the phone fetches the song from YouTube itself; the server is only a fallback
+    const startOnDevice = () => {
+      setIsBuffering(shouldAutoPlay);
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("on-device download timed out")), ON_DEVICE_TIMEOUT_MS));
+      Promise.race([
+        loadOnDevice().then((ondevice) => {
+          if (!ondevice) throw new Error("on-device streaming unsupported");
+          return ondevice.getTrackBlob(trackId);
+        }),
+        timeout,
+      ])
+        .then((blob) => {
+          if (currentTrackRef.current?.id !== track.id) return;
+          onDeviceBlobRef.current = { id: trackId, blob };
+          revokeBlobUrl();
+          blobUrlRef.current = URL.createObjectURL(blob);
+          startNetwork(blobUrlRef.current);
+        })
+        .catch((err) => {
+          if (currentTrackRef.current?.id !== track.id) return;
+          console.warn("AuraSynq: on-device stream failed, using the server", err);
+          startNetwork(streamKey(trackId));
+        });
+    };
+
     // Cached songs play from the device once the element is unlocked (saves data, works offline).
     // Otherwise start synchronously to keep the user-gesture context mobile browsers require.
     if (online && !(isCached && unlockedRef.current)) {
-      if (isYouTube) return startNetwork(streamKey(trackId));
+      if (isYouTube) return isMobileApp ? startOnDevice() : startNetwork(streamKey(trackId));
       if (track.url && DIRECT_AUDIO.test(track.url)) return startNetwork(track.url);
     }
 
     playFromCache(track, trackId, shouldAutoPlay).then((played) => {
       if (played || currentTrackRef.current?.id !== track.id) return;
-      if (online && isYouTube) return startNetwork(streamKey(trackId));
+      if (online && isYouTube) return isMobileApp ? startOnDevice() : startNetwork(streamKey(trackId));
       if (online && track.url && DIRECT_AUDIO.test(track.url)) return startNetwork(track.url);
       setIsBuffering(false);
       setIsPlaying(false);
@@ -763,6 +808,11 @@ export function AudioProvider({ children }) {
     const id = extractId(track);
     if (!id || !YOUTUBE_ID.test(id) || warmedIdsRef.current.has(id)) return;
     warmedIdsRef.current.add(id);
+    if (isMobileApp) {
+      // Download the upcoming song on the phone so the skip is instant
+      loadOnDevice().then((ondevice) => ondevice?.prefetchTrack(id));
+      return;
+    }
     fetch(`${streamKey(id)}&warm=1`).catch(() => warmedIdsRef.current.delete(id));
   };
 
@@ -776,17 +826,24 @@ export function AudioProvider({ children }) {
 
   // Lists (categories, Discover, Trends) pre-resolve the songs most likely to be tapped first
   const prefetchTracks = (tracks, count = WARM_LIST_TOP) => {
+    // Phone: don't spend mobile data on songs that may never play; just have the session ready
+    if (isMobileApp) {
+      loadOnDevice().then((ondevice) => ondevice?.warmUp());
+      return;
+    }
     (tracks || []).slice(0, count).forEach(warmTrack);
   };
 
-  const autoCacheTrack = async (track) => {
+  const autoCacheTrack = async (track, downloadedBlob = null) => {
     const trackId = extractId(track);
     if (!trackId || !YOUTUBE_ID.test(trackId) || cachedIdsRef.current.has(trackId)) return;
     if (!("caches" in window) || navigator.onLine === false || navigator.connection?.saveData) return;
     cachedIdsRef.current.add(trackId);
     try {
       const cache = await caches.open(AUDIO_CACHE);
-      await cache.put(streamKey(trackId), await fetchAudioForCache(streamKey(trackId)));
+      await cache.put(streamKey(trackId), downloadedBlob
+        ? new Response(downloadedBlob, { status: 200, headers: { "content-type": downloadedBlob.type || "audio/mp4" } })
+        : await fetchAudioForCache(streamKey(trackId)));
 
       // Keep only the most recent auto-cached songs; explicit downloads are never evicted
       const downloaded = new Set(readStored(DOWNLOADS_KEY).map(t => extractId(t)));
@@ -1176,9 +1233,11 @@ export function AudioProvider({ children }) {
             }
 
             const track = currentTrackRef.current;
-            if (track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && !a.src.startsWith('blob:')) {
+            // Songs downloaded on the phone are cached from that copy; other blobs came from the cache
+            const deviceBlob = track && onDeviceBlobRef.current.id === extractId(track) ? onDeviceBlobRef.current.blob : null;
+            if (track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && (deviceBlob || !a.src.startsWith('blob:'))) {
               trackListenRef.current = -Infinity; // once per play
-              autoCacheTrack(track);
+              autoCacheTrack(track, deviceBlob);
             }
           }}
           onWaiting={() => {
