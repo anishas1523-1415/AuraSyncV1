@@ -6,6 +6,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
 import AuraDial from "./AuraDial";
+import { useAndroidBackButton } from "@/lib/backButton";
 
 export default function AppShell() {
   const { isSignedIn } = useAuth();
@@ -14,6 +15,7 @@ export default function AppShell() {
   const searchParams = useSearchParams();
   const { currentTrack, stopAudio, sharedTrackInfo, openSharedTrack, playSharedTrack, clearSharedTrack } = useAudio();
   const wasSignedInRef = useRef(isSignedIn);
+  useAndroidBackButton();
 
   const isAuthPage =
     pathname?.startsWith("/sign-in") || pathname?.startsWith("/sign-up");

@@ -15,7 +15,13 @@ const AUDIO_ITAG = 140; // AAC 128 kbps, plays in every WebView
 const CHUNK_BYTES = 1024 * 1024; // larger chunks get throttled by YouTube
 const FIRST_CHUNK_BYTES = 256 * 1024; // ~16s of audio: enough to start playing right away
 const PARALLEL_CHUNKS = 4; // a typical 3-5 MB song downloads in one round
+const SLOW_LINK_PARALLEL = 2; // on a slow link more parallel chunks only delay the next one needed
+const SLOW_LINK_BYTES_PER_SEC = 400 * 1024;
+const CHUNK_RETRIES = 2; // per chunk, for flaky mobile connections
 const MAX_CACHED_SONGS = 4;
+const LOCATION_TTL_MS = 3 * 60 * 60 * 1000; // stream URLs expire after ~6 h
+const LOCATE_TIMEOUT_MS = 40000; // BotGuard + lookup; past this, fail instead of "Streaming..." forever
+const MAX_LOCATIONS = 40;
 const POST_BODY = "eAA="; // protobuf {15: 0}, what YouTube's own player sends
 const GOOGLEVIDEO_HEADERS = {
   accept: "*/*",
@@ -25,6 +31,15 @@ const GOOGLEVIDEO_HEADERS = {
 };
 
 export const isOnDeviceSupported = isNativeApp;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Recent failures, readable over USB debugging: window.__auraOnDevice.errors
+const recentErrors = [];
+function noteError(videoId, stage, err) {
+  recentErrors.unshift({ at: new Date().toISOString(), videoId, stage, message: String(err?.message || err) });
+  recentErrors.length = Math.min(recentErrors.length, 30);
+}
 
 // ─── Session: Innertube client + PO token minter ─────────────
 
@@ -55,6 +70,11 @@ async function createSession() {
   return { yt, minter, expiresAt };
 }
 
+// YouTube rejected something tied to the session (PO token, visitor data): start a new one
+function resetSession() {
+  session = null;
+}
+
 export function getSession() {
   if (session && session.expiresAt > Date.now()) return Promise.resolve(session);
   if (!sessionPromise) {
@@ -67,7 +87,7 @@ export function getSession() {
 
 // ─── Resolve a song to a deciphered audio URL ────────────────
 
-async function resolveAudio(videoId) {
+async function lookUp(videoId) {
   const { yt, minter } = await getSession();
   const contentPoToken = await minter.mintAsWebsafeString(videoId);
 
@@ -130,7 +150,53 @@ async function resolveAudio(videoId) {
   };
 }
 
-// ─── Download: POST + `range=` query parameter, in parallel chunks ───
+const isLiveError = (err) => /live stream/i.test(err?.message || "");
+
+// One retry with a brand-new session: most failures are an expired or rejected token
+async function resolveAudio(videoId) {
+  try {
+    return await lookUp(videoId);
+  } catch (err) {
+    if (isLiveError(err)) throw err;
+    noteError(videoId, "lookup", err);
+    console.warn("AuraSynq on-device: lookup failed, retrying with a new session", err);
+    resetSession();
+    return lookUp(videoId);
+  }
+}
+
+const refusedError = (message) => Object.assign(new Error(message), { refused: true });
+
+// The stream URL with googlevideo's redirects already followed (a POST body doesn't survive a
+// redirect), so playback can go straight to downloading
+async function locate(videoId) {
+  for (let attempt = 0; ; attempt++) {
+    const resolved = await resolveAudio(videoId);
+    const head = await nativeFetchBytes(resolved.url, { method: "HEAD", headers: GOOGLEVIDEO_HEADERS });
+    if (head.status !== 403) return { ...resolved, url: head.url || resolved.url };
+    if (attempt > 0) throw refusedError("YouTube refused the stream (403)");
+    resetSession();
+  }
+}
+
+const locations = new Map(); // videoId -> { at, promise }
+
+function getLocation(videoId) {
+  const hit = locations.get(videoId);
+  if (hit && Date.now() - hit.at < LOCATION_TTL_MS) return hit.promise;
+  const promise = Promise.race([
+    locate(videoId),
+    sleep(LOCATE_TIMEOUT_MS).then(() => { throw new Error("Looking the song up took too long"); }),
+  ]);
+  locations.set(videoId, { at: Date.now(), promise });
+  promise.catch(() => {
+    if (locations.get(videoId)?.promise === promise) locations.delete(videoId);
+  });
+  while (locations.size > MAX_LOCATIONS) locations.delete(locations.keys().next().value);
+  return promise;
+}
+
+// ─── Download: POST + `range=` query parameter, in chunks ───
 
 // Byte ranges for a song; the first one is small so playback can start almost immediately
 function planRanges(size) {
@@ -141,70 +207,80 @@ function planRanges(size) {
   return ranges;
 }
 
-// Downloads a song, handing each chunk to `onChunk` in order as soon as it (and every chunk
-// before it) has arrived. Resolves to the complete file.
+// Downloads a located song, handing each chunk to `onChunk` in order as soon as it (and every
+// chunk before it) has arrived. Resolves to the complete file.
 async function downloadAudio({ url, size, mimeType }, onChunk = () => {}) {
   const deliver = (bytes) => {
     try { onChunk(bytes); } catch (err) { console.warn("AuraSynq on-device: chunk consumer failed", err); }
   };
 
-  // Follow googlevideo's redirects once (POST bodies don't survive redirects)
-  const head = await nativeFetchBytes(url, { method: "HEAD", headers: GOOGLEVIDEO_HEADERS });
-  if (head.status === 403) throw new Error("YouTube refused the stream (403)");
-  const finalUrl = head.url || url;
-  const fetchChunk = (from, to) => nativeFetchBytes(`${finalUrl}&range=${from}-${to}`, {
-    method: "POST",
-    headers: GOOGLEVIDEO_HEADERS,
-    bodyBase64: POST_BODY,
-  });
+  // null = past the end of the file (only asked for when the size is unknown)
+  const fetchChunk = async (from, to) => {
+    for (let attempt = 0; ; attempt++) {
+      let res;
+      try {
+        res = await nativeFetchBytes(`${url}&range=${from}-${to}`, {
+          method: "POST",
+          headers: GOOGLEVIDEO_HEADERS,
+          bodyBase64: POST_BODY,
+        });
+      } catch (err) {
+        res = { status: 0, error: err };
+      }
+      if (res.status === 200 && res.bytes) return res.bytes;
+      if (res.status === 416) return null;
+      const reason = res.status ? `HTTP ${res.status}` : res.error?.message || "network error";
+      if (res.status === 403) throw refusedError(`YouTube refused bytes ${from}-${to} (403)`);
+      if (attempt >= CHUNK_RETRIES) throw new Error(`Bytes ${from}-${to} failed: ${reason}`);
+      await sleep(400 * (attempt + 1));
+    }
+  };
 
   if (!size) {
     // Size not stated: read sequentially until a short chunk marks the end (capped at ~40 MB)
     const parts = [];
     for (let index = 0; index < 40; index++) {
-      const res = await fetchChunk(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES - 1);
-      if (res.status !== 200 || !res.bytes) {
-        if (index > 0 && res.status === 416) break; // asked past the end
-        throw new Error(`Chunk ${index} failed with HTTP ${res.status}`);
+      const bytes = await fetchChunk(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES - 1);
+      if (!bytes) {
+        if (index > 0) break;
+        throw new Error("The stream is empty");
       }
-      parts.push(res.bytes);
-      deliver(res.bytes);
-      if (res.bytes.length < CHUNK_BYTES) break;
+      parts.push(bytes);
+      deliver(bytes);
+      if (bytes.length < CHUNK_BYTES) break;
     }
     return new Blob(parts, { type: mimeType });
   }
 
   const ranges = planRanges(size);
   const parts = new Array(ranges.length);
-  let nextIndex = 0;
-  let nextToDeliver = 0;
+
+  // The first chunk gets the connection to itself: it is what starts playback
+  const started = Date.now();
+  parts[0] = await fetchChunk(...ranges[0]);
+  if (!parts[0]) throw new Error("The stream is empty");
+  deliver(parts[0]);
+  const bytesPerSec = parts[0].length / Math.max(0.05, (Date.now() - started) / 1000);
+  const parallel = bytesPerSec < SLOW_LINK_BYTES_PER_SEC ? SLOW_LINK_PARALLEL : PARALLEL_CHUNKS;
+
+  let nextIndex = 1;
+  let nextToDeliver = 1;
   const deliverReady = () => {
     while (nextToDeliver < parts.length && parts[nextToDeliver]) {
       deliver(parts[nextToDeliver]);
       nextToDeliver++;
     }
   };
-
   const worker = async () => {
     while (nextIndex < ranges.length) {
       const index = nextIndex++;
-      const [from, to] = ranges[index];
-      let attempt = 0;
-      for (;;) {
-        const res = await fetchChunk(from, to);
-        if (res.status === 200 && res.bytes) {
-          parts[index] = res.bytes;
-          deliverReady();
-          break;
-        }
-        // One retry per chunk for flaky mobile connections; 403 means the token was rejected
-        if (res.status === 403 || ++attempt > 1) {
-          throw new Error(`Chunk ${index} failed with HTTP ${res.status}`);
-        }
-      }
+      const bytes = await fetchChunk(...ranges[index]);
+      if (!bytes) throw new Error(`Chunk ${index} is past the end of the stream`);
+      parts[index] = bytes;
+      deliverReady();
     }
   };
-  await Promise.all(Array.from({ length: Math.min(PARALLEL_CHUNKS, ranges.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(parallel, ranges.length - 1) }, worker));
   return new Blob(parts, { type: mimeType });
 }
 
@@ -213,7 +289,12 @@ async function downloadAudio({ url, size, mimeType }, onChunk = () => {}) {
 const songs = new Map(); // videoId -> Promise<Blob> (finished or still downloading)
 
 const remember = (videoId, pending) => {
-  pending.catch(() => { if (songs.get(videoId) === pending) songs.delete(videoId); });
+  pending.catch((err) => {
+    noteError(videoId, "download", err);
+    if (songs.get(videoId) === pending) songs.delete(videoId);
+    locations.delete(videoId);
+    if (err?.refused) resetSession();
+  });
   songs.set(videoId, pending);
   while (songs.size > MAX_CACHED_SONGS) songs.delete(songs.keys().next().value);
   return pending;
@@ -230,18 +311,19 @@ export function peekTrack(videoId) {
 
 export function forgetTrack(videoId) {
   songs.delete(videoId);
+  locations.delete(videoId);
 }
 
 export function getTrackBlob(videoId) {
-  return peekTrack(videoId) || remember(videoId, resolveAudio(videoId).then((resolved) => downloadAudio(resolved)));
+  return peekTrack(videoId) || remember(videoId, getLocation(videoId).then((located) => downloadAudio(located)));
 }
 
-// Progressive playback: `onReady({ codecType, durationSec, size })` once the song is resolved,
+// Progressive playback: `onReady({ codecType, durationSec, size })` once the song is located,
 // then `onChunk(bytes)` in order. Resolves to the whole file, kept for replays and offline caching.
 export function streamTrack(videoId, { onReady, onChunk } = {}) {
-  return remember(videoId, resolveAudio(videoId).then((resolved) => {
-    onReady?.({ codecType: resolved.codecType, durationSec: resolved.durationSec, size: resolved.size });
-    return downloadAudio(resolved, onChunk);
+  return remember(videoId, getLocation(videoId).then((located) => {
+    onReady?.({ codecType: located.codecType, durationSec: located.durationSec, size: located.size });
+    return downloadAudio(located, onChunk);
   }));
 }
 
@@ -250,23 +332,34 @@ export function prefetchTrack(videoId) {
   getTrackBlob(videoId).catch(() => {});
 }
 
+// Look songs up without downloading them (a few KB each), so tapping one starts streaming at once
+export function preResolve(videoIds) {
+  videoIds.slice(0, 4).forEach((videoId, i) => {
+    if (songs.has(videoId) || locations.has(videoId)) return;
+    setTimeout(() => getLocation(videoId).catch(() => {}), i * 250);
+  });
+}
+
 // Start BotGuard early (it takes a second or two) so the first tap is faster
 export function warmUp() {
   getSession().catch((err) => console.warn("AuraSynq on-device: session warm-up failed", err));
 }
 
-// Diagnostics from a USB-debug session: await window.__auraOnDevice.test("yKNxeF4KMsY")
+// Diagnostics from a USB-debug session: await window.__auraOnDevice.testProgressive("yKNxeF4KMsY")
 if (typeof window !== "undefined") {
   window.__auraOnDevice = {
     getSession,
     resolveAudio,
+    preResolve,
+    errors: recentErrors,
     async test(videoId) {
       const started = Date.now();
       const blob = await getTrackBlob(videoId);
       return { bytes: blob.size, type: blob.type, ms: Date.now() - started };
     },
     async testProgressive(videoId) {
-      forgetTrack(videoId);
+      const preLocated = locations.has(videoId);
+      songs.delete(videoId);
       const started = Date.now();
       let readyMs = 0;
       let firstChunkMs = 0;
@@ -275,7 +368,7 @@ if (typeof window !== "undefined") {
         onReady: () => { readyMs = Date.now() - started; },
         onChunk: () => { chunks++; if (!firstChunkMs) firstChunkMs = Date.now() - started; },
       });
-      return { readyMs, firstChunkMs, chunks, totalMs: Date.now() - started, bytes: blob.size };
+      return { preLocated, readyMs, firstChunkMs, chunks, totalMs: Date.now() - started, bytes: blob.size };
     },
   };
 }

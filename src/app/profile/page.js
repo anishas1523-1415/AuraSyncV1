@@ -8,6 +8,7 @@ import {
   Gear, Bell, Shield, CaretRight, Play, DownloadSimple, X, Export, Trash, Pause
 } from "@phosphor-icons/react";
 import { toast } from "@/lib/toast";
+import { useCloseOnBack } from "@/lib/backButton";
 
 export default function Profile() {
   const { user, isLoaded } = useUser();
@@ -52,6 +53,7 @@ export default function Profile() {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIosGuide, setShowIosGuide] = useState(false);
+  useCloseOnBack(showIosGuide, () => setShowIosGuide(false));
 
   useEffect(() => {
     // Check if running on iOS

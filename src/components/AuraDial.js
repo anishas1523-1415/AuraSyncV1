@@ -5,10 +5,12 @@ import { Sparkle, MagnifyingGlass, PlayCircle, Planet, User, DownloadSimple, Boo
 import styles from "./AuraDial.module.css";
 import { useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
+import { useCloseOnBack } from "@/lib/backButton";
 
 export default function AuraDial() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  useCloseOnBack(isOpen, () => setIsOpen(false));
   
   const { contextPlaylist, queue, currentTrack } = useAudio();
 

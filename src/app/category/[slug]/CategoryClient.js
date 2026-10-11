@@ -1,84 +1,55 @@
 "use client";
 import styles from "./page.module.css";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { Play, ArrowLeft, Pause, MusicNote, Plus } from "@phosphor-icons/react";
+import { Play, ArrowLeft, Pause, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
-import { apiUrl } from "@/lib/api";
+import SyncButton from "@/components/SyncButton";
+import { toast } from "@/lib/toast";
+import { mixSongs, forYouSongs } from "@/lib/catalog";
 import { CATEGORY_MAP } from "./categories";
 
-const getFavoriteArtist = () => {
-  try {
-    const stored = localStorage.getItem("aurasynq_play_history");
-    if (!stored) return null;
-    const history = JSON.parse(stored);
-    if (!history || history.length === 0) return null;
-    
-    const counts = {};
-    let maxArtist = null;
-    let maxCount = 0;
-    
-    for (const track of history) {
-      if (!track.artist) continue;
-      const artist = track.artist.trim();
-      counts[artist] = (counts[artist] || 0) + 1;
-      if (counts[artist] > maxCount) {
-        maxCount = counts[artist];
-        maxArtist = artist;
-      }
-    }
-    return maxArtist;
-  } catch (e) {
-    return null;
-  }
-};
-
-
 export default function CategoryClient({ slug }) {
-  const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist, prefetchTracks } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist, prefetchTracks, playHistory, likedTracks } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeIndex, setActiveIndex] = useState(null);
   const [activeModalTrack, setActiveModalTrack] = useState(null);
+  const requestRef = useRef(0);
 
   const category = CATEGORY_MAP[slug] || {
     title: `${slug?.charAt(0).toUpperCase()}${slug?.slice(1)} Picks`,
-    query: `${slug} songs`,
+    seeds: [`${slug} songs`, `${slug} hits`],
     color: "#8A2BE2",
     emoji: "🎵",
   };
 
-  useEffect(() => {
-    async function fetchSongs() {
-      setLoading(true);
-      try {
-        let searchQuery = category.query;
-        const favArtist = getFavoriteArtist();
-
-        if (slug === "foryou") {
-          if (favArtist) {
-            searchQuery = `${favArtist} hit songs`;
-          }
-        } else if (favArtist && slug !== "sleep" && slug !== "focus") {
-          // Personalize category searches with the user's favorite artist
-          searchQuery = `${searchQuery} ${favArtist}`;
-        }
-
-        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(searchQuery)}`));
-        const data = await res.json();
-        if (data.tracks?.length) {
-          const list = data.tracks.slice(0, 20);
-          setTracks(list);
-          prefetchTracks(list);
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
+  // A new mix of songs on every visit; `fresh` (the sync button) skips the short-lived cache
+  const loadSongs = async (fresh = false) => {
+    const requestId = ++requestRef.current;
+    try {
+      const list = slug === "foryou"
+        ? await forYouSongs({ history: playHistory, liked: likedTracks, fallbackSeeds: category.seeds, fresh })
+        : await mixSongs(slug, category.seeds, { fresh });
+      if (requestId !== requestRef.current) return false;
+      setTracks(list);
+      prefetchTracks(list);
+      return list.length > 0;
+    } catch (e) {
+      console.error(e);
+      if (requestId === requestRef.current) {
+        toast("Couldn't load songs — check your connection and tap Sync", { variant: "error" });
       }
+      return false;
+    } finally {
+      if (requestId === requestRef.current) setLoading(false);
     }
-    fetchSongs();
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    loadSongs();
+    // Library state arrives after mount; For You only needs it once, on the first load
   }, [slug]);
 
   // Expose category tracks as global context playlist for floating dial
@@ -100,7 +71,6 @@ export default function CategoryClient({ slug }) {
     if (currentTrack?.id === track.id) {
       togglePlay();
     } else {
-      setActiveIndex(index);
       playTrack(track, tracks);
     }
   };
@@ -118,15 +88,18 @@ export default function CategoryClient({ slug }) {
             {loading ? "Loading..." : `${tracks.length} songs`}
           </p>
         </div>
-        {!loading && tracks.length > 0 && (
+        {!loading && (
           <div className={styles.actionRow}>
-            <button
-              className={styles.playAllBtn}
-              style={{ background: category.color }}
-              onClick={() => playTrack(tracks[0], tracks)}
-            >
-              <Play size={20} weight="fill" /> Play All
-            </button>
+            {tracks.length > 0 && (
+              <button
+                className={styles.playAllBtn}
+                style={{ background: category.color }}
+                onClick={() => playTrack(tracks[0], tracks)}
+              >
+                <Play size={20} weight="fill" /> Play All
+              </button>
+            )}
+            <SyncButton onSync={() => loadSongs(true)} />
           </div>
         )}
       </div>

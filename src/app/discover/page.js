@@ -3,75 +3,58 @@ import styles from "./page.module.css";
 import { useAudio } from "@/contexts/AudioContext";
 import { Heart, Share, Play, Pause } from "@phosphor-icons/react";
 import { useEffect, useState, useRef } from "react";
-import { shareOrCopy } from "@/lib/toast";
-import { apiUrl, siteUrl } from "@/lib/api";
+import { shareOrCopy, toast } from "@/lib/toast";
+import { siteUrl } from "@/lib/api";
+import { mixSongs, forYouSongs } from "@/lib/catalog";
+import { DISCOVER_SEEDS } from "@/app/category/[slug]/categories";
+import SyncButton from "@/components/SyncButton";
 
-const getFavoriteArtist = () => {
-  try {
-    const stored = localStorage.getItem("aurasynq_play_history");
-    if (!stored) return null;
-    const history = JSON.parse(stored);
-    if (!history || history.length === 0) return null;
-    
-    const counts = {};
-    let maxArtist = null;
-    let maxCount = 0;
-    
-    for (const track of history) {
-      if (!track.artist) continue;
-      const artist = track.artist.trim();
-      counts[artist] = (counts[artist] || 0) + 1;
-      if (counts[artist] > maxCount) {
-        maxCount = counts[artist];
-        maxArtist = artist;
-      }
-    }
-    return maxArtist;
-  } catch (e) {
-    return null;
-  }
+// Every third card follows the listener's own taste (radio of songs they played or liked)
+const weave = (mix, personal) => {
+  const out = [];
+  const seen = new Set();
+  const add = (t) => { if (t && !seen.has(t.id)) { seen.add(t.id); out.push(t); } };
+  mix.forEach((t, i) => {
+    add(t);
+    if (i % 2 === 1) add(personal[(i - 1) / 2]);
+  });
+  personal.forEach(add);
+  return out;
 };
 
-// Singular "... song" phrasing returns individual songs rather than hour-long compilations
-const QUERIES = [
-  "pop song",
-  "electronic song",
-  "viral song",
-  "indie pop song",
-  "hip hop rap songs",
-];
-
 export default function Discover() {
-  const { playTrack, currentTrack, isPlaying, togglePlay, toggleLikeTrack, isTrackLiked, prefetchTracks } = useAudio();
+  const { playTrack, currentTrack, isPlaying, togglePlay, toggleLikeTrack, isTrackLiked, prefetchTracks, playHistory, likedTracks } = useAudio();
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const loadedRef = useRef(false);
+  const feedRef = useRef(null);
+
+  const loadFeed = async (fresh = false) => {
+    try {
+      const hasTaste = playHistory.length > 0 || likedTracks.length > 0;
+      const [mix, personal] = await Promise.allSettled([
+        mixSongs("discover", DISCOVER_SEEDS, { seedsPerMix: 3, count: 18, fresh }),
+        hasTaste ? forYouSongs({ history: playHistory, liked: likedTracks, count: 8, fresh }) : Promise.resolve([]),
+      ]);
+      const list = weave(mix.value || [], personal.value || []);
+      if (!list.length) throw mix.reason || new Error("No songs found");
+      setTracks(list);
+      prefetchTracks(list);
+      feedRef.current?.scrollTo({ top: 0 });
+      return true;
+    } catch (e) {
+      console.error(e);
+      toast("Couldn't load your feed — check your connection and tap sync", { variant: "error" });
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (loadedRef.current) return;
     loadedRef.current = true;
-
-    async function fetchTracks() {
-      try {
-        const favArtist = getFavoriteArtist();
-        let query = QUERIES[Math.floor(Math.random() * QUERIES.length)];
-        if (favArtist) {
-          query = `${query} ${favArtist}`;
-        }
-        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
-        const data = await res.json();
-        if (data.tracks?.length) {
-          const list = data.tracks.slice(0, 15);
-          setTracks(list);
-          prefetchTracks(list);
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchTracks();
+    loadFeed();
   }, []);
 
   // Likes go to the shared library so they show up in Library → Liked Songs and sync to the cloud
@@ -99,7 +82,10 @@ export default function Discover() {
   }
 
   return (
-    <div className={styles.feedContainer}>
+    <div className={styles.feedContainer} ref={feedRef}>
+      <div className={styles.syncFloat}>
+        <SyncButton floating onSync={() => loadFeed(true)} />
+      </div>
       {tracks.map((track) => {
         const isActive = currentTrack?.id === track.id;
         const isLiked = isTrackLiked(track.id);

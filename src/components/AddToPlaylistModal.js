@@ -4,11 +4,13 @@ import { useAudio } from "@/contexts/AudioContext";
 import { X, Plus, MusicNote } from "@phosphor-icons/react";
 import styles from "./AddToPlaylistModal.module.css";
 import { toast } from "@/lib/toast";
+import { useCloseOnBack } from "@/lib/backButton";
 
 export default function AddToPlaylistModal({ track, onClose }) {
   const { customPlaylists, createPlaylist, addTrackToPlaylist } = useAudio();
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  useCloseOnBack(!!track, onClose);
 
   if (!track) return null;
 

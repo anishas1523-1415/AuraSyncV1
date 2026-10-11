@@ -22,7 +22,10 @@ const config: CapacitorConfig = {
       },
   android: {
     allowMixedContent: false
-  }
+  },
+  // Debug builds otherwise log every native call result to the console, including each ~1 MB
+  // audio chunk as base64 text, which noticeably slowed down streaming
+  loggingBehavior: 'none',
 };
 
 export default config;

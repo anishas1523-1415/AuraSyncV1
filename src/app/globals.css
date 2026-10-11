@@ -21,6 +21,13 @@
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Android WebView paints a blue box over anything tapped (Like, Share, cards): turn it off */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Focus rings only for keyboard users, not after a tap */
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* Allow text selection specifically for input fields */

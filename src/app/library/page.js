@@ -9,6 +9,7 @@ import styles from "./page.module.css";
 import { useUser } from "@/lib/clerk";
 import { toast, shareOrCopy } from "@/lib/toast";
 import { siteUrl } from "@/lib/api";
+import { useCloseOnBack } from "@/lib/backButton";
 
 // Recommended songs to add to custom playlists
 const RECOMMENDATIONS = [
@@ -32,6 +33,10 @@ export default function Library() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [showRenameModal, setShowRenameModal] = useState(false);
+  // Back closes a dialog first, then leaves the open playlist
+  useCloseOnBack(selectedPlaylistId !== null, () => setSelectedPlaylistId(null));
+  useCloseOnBack(showCreateModal, () => setShowCreateModal(false));
+  useCloseOnBack(showRenameModal, () => setShowRenameModal(false));
   const [renamePlaylistName, setRenamePlaylistName] = useState("");
   const [activeTab, setActiveTab] = useState("all"); // "all" | "playlists" | "liked"
   const [isSyncing, setIsSyncing] = useState(false);

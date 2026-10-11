@@ -1,0 +1,51 @@
+.syncBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 30px;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.syncBtn:active { transform: scale(0.95); }
+.syncBtn:disabled { cursor: default; opacity: 0.85; }
+
+.small {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 12px;
+  gap: 0.3rem;
+  color: rgba(255, 255, 255, 0.75);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.floating {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.synced {
+  border-color: rgba(0, 255, 204, 0.35) !important;
+  background: rgba(0, 255, 204, 0.1) !important;
+  color: #00ffcc !important;
+  box-shadow: 0 0 10px rgba(0, 255, 204, 0.15);
+}
+
+.spinning { animation: spin 0.9s linear infinite; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

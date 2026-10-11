@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, forwardRef } from "react";
 import { useAudio, useAudioProgress } from "@/contexts/AudioContext";
 import styles from "./page.module.css";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
@@ -7,17 +7,21 @@ import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, He
 import { useRouter } from "next/navigation";
 import { shareOrCopy } from "@/lib/toast";
 import { siteUrl } from "@/lib/api";
+import { useCloseOnBack } from "@/lib/backButton";
+import SyncButton from "@/components/SyncButton";
 
 export default function Player() {
   const router = useRouter();
   const { 
     currentTrack, isPlaying, isBuffering, togglePlay, seekTo, playNext, playPrevious, queue, removeFromQueue, playTrack, isShuffle, toggleShuffle,
-    toggleLikeTrack, isTrackLiked
+    toggleLikeTrack, isTrackLiked, syncUpNext
   } = useAudio();
   const { progress, duration } = useAudioProgress();
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState("next");
+  useCloseOnBack(showLyrics, () => setShowLyrics(false));
+  useCloseOnBack(showQueue, () => setShowQueue(false));
 
   const isLiked = currentTrack ? isTrackLiked(currentTrack.id) : false;
 
@@ -44,18 +48,6 @@ export default function Player() {
   const lastClickTime = useRef(0);
   const clickTimeout = useRef(null);
   const activeLineRef = useRef(null);
-
-  // Motion values to track drag offset and drive rotation/badge opacities dynamically
-  const x = useMotionValue(0);
-  const rotate = useTransform(x, [-200, 200], [-15, 15]);
-  const skipOpacity = useTransform(x, [-120, -20], [1, 0]);
-  const prevOpacity = useTransform(x, [20, 120], [0, 1]);
-
-  // Reset x motion position whenever the song changes
-  useEffect(() => {
-    // Only reset if we somehow got stuck, normal flow handles x.set(0) in the swipe/btn handlers
-    x.set(0);
-  }, [currentTrack?.id]);
 
   // Find the active lyric line based on progress
   const activeLyricIndex = currentTrack?.lyrics ? currentTrack.lyrics.findIndex((l, i, arr) => {
@@ -115,61 +107,23 @@ export default function Player() {
     handleTap(event);
   };
 
-  const handleDragEnd = (event, info) => {
-    const swipeThreshold = 80;
-    const velocityThreshold = 400;
-    const dragDistance = info.offset.x;
-    const dragVelocity = info.velocity.x;
-
-    const hasNext = queue && queue.length > 1;
-    const hasPrev = queue && queue.length > 1;
-
-    if (dragDistance < -swipeThreshold || dragVelocity < -velocityThreshold) {
-      if (hasNext) {
-        setSwipeDirection("next");
-        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
-        animate(x, -500, { duration: 0.2 }).then(() => {
-          x.set(0);
-          playNext(true);
-        });
-      } else {
-        animate(x, 0, { type: "spring", stiffness: 300, damping: 22 });
-      }
-    } else if (dragDistance > swipeThreshold || dragVelocity > velocityThreshold) {
-      if (hasPrev) {
-        setSwipeDirection("prev");
-        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
-        animate(x, 500, { duration: 0.2 }).then(() => {
-          x.set(0);
-          playPrevious(true);
-        });
-      } else {
-        animate(x, 0, { type: "spring", stiffness: 300, damping: 22 });
-      }
-    } else {
-      // Smoothly snap back to center using spring physics
-      animate(x, 0, { type: "spring", stiffness: 300, damping: 22 });
-    }
+  // The outgoing card flies off from wherever it is (its exit animation) while the new one
+  // slides in; the song changes right away instead of after an animation
+  const goTo = (direction) => {
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+    setSwipeDirection(direction);
+    if (direction === "next") playNext(true);
+    else playPrevious(true);
   };
 
   const handleBtnPrev = (e) => {
     e.stopPropagation();
-    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
-    setSwipeDirection("prev");
-    animate(x, 500, { duration: 0.2 }).then(() => {
-      x.set(0);
-      playPrevious(true);
-    });
+    goTo("prev");
   };
 
   const handleBtnNext = (e) => {
     e.stopPropagation();
-    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
-    setSwipeDirection("next");
-    animate(x, -500, { duration: 0.2 }).then(() => {
-      x.set(0);
-      playNext(true);
-    });
+    goTo("next");
   };
 
   const handlePlayFromQueue = (track) => {
@@ -185,39 +139,6 @@ export default function Player() {
 
   const hasDuration = Number.isFinite(duration) && duration > 0;
   const percent = hasDuration ? Math.min(100, (progress / duration) * 100) : 0;
-
-  const cardVariants = {
-    enter: (dir) => ({
-      left: dir === "next" ? 300 : dir === "prev" ? -300 : 0,
-      rotateZ: dir === "next" ? 15 : dir === "prev" ? -15 : 0,
-      opacity: 0,
-      scale: 0.92
-    }),
-    center: {
-      left: 0,
-      rotateZ: 0,
-      opacity: 1,
-      scale: 1,
-      transition: {
-        left: { type: "spring", stiffness: 300, damping: 25 },
-        rotateZ: { type: "spring", stiffness: 300, damping: 25 },
-        opacity: { duration: 0.2 },
-        scale: { duration: 0.2 }
-      }
-    },
-    exit: (dir) => ({
-      left: dir === "next" ? -400 : dir === "prev" ? 400 : 0,
-      rotateZ: dir === "next" ? -25 : dir === "prev" ? 25 : 0,
-      opacity: 0,
-      scale: 0.92,
-      transition: {
-        left: { duration: 0.3, ease: "easeOut" },
-        rotateZ: { duration: 0.3, ease: "easeOut" },
-        opacity: { duration: 0.2 },
-        scale: { duration: 0.2 }
-      }
-    })
-  };
 
   return (
     <div className={styles.container}>
@@ -242,18 +163,10 @@ export default function Player() {
       {!showLyrics && !showQueue ? (
         <div className={styles.cardWrapper}>
           <AnimatePresence initial={false} custom={swipeDirection} mode="popLayout">
-            <motion.div 
+            <SwipeCard
               key={currentTrack.id}
-              custom={swipeDirection}
-              variants={cardVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              className={styles.minimalPlayer}
-              drag="x"
-              dragConstraints={{ left: -400, right: 400 }}
-              onDragEnd={handleDragEnd}
-              style={{ x, rotate }}
+              direction={swipeDirection}
+              onSwipe={goTo}
               onTap={handleCardTap}
             >
               {/* Share (Top Left) and Like (Top Right) absolute buttons inside card */}
@@ -274,14 +187,6 @@ export default function Player() {
               >
                 <Heart size={24} weight={isLiked ? "fill" : "regular"} />
               </button>
-
-              {/* Tinder-style SKIP and PREV visual stamp overlays */}
-              <motion.div className={styles.skipBadge} style={{ opacity: skipOpacity }}>
-                <span>SKIP</span>
-              </motion.div>
-              <motion.div className={styles.prevBadge} style={{ opacity: prevOpacity }}>
-                <span>PREV</span>
-              </motion.div>
 
               <div className={styles.coverContainer} onClick={(e) => e.stopPropagation()}>
                 <img 
@@ -328,7 +233,7 @@ export default function Player() {
               </div>
 
               <p className={styles.hint}>Swipe left/right to change • Double tap for lyrics</p>
-            </motion.div>
+            </SwipeCard>
           </AnimatePresence>
 
           {/* Centered Media Controls */}
@@ -363,6 +268,17 @@ export default function Player() {
           <div className={styles.queueHeader}>
             <h2>Up Next</h2>
             <div className={styles.queueHeaderRight}>
+              <button
+                className={`${styles.queueShuffleBtn} ${isShuffle ? styles.activeShuffle : ""}`}
+                onClick={() => {
+                  if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
+                  toggleShuffle();
+                }}
+                title={isShuffle ? "Shuffle on" : "Shuffle off"}
+              >
+                <Shuffle size={13} weight="bold" />
+              </button>
+              <SyncButton size="sm" onSync={syncUpNext} />
               <span className={styles.queueCount}>{queue.length} songs</span>
             </div>
           </div>
@@ -432,3 +348,86 @@ export default function Player() {
     </div>
   );
 }
+
+const cardVariants = {
+  enter: (dir) => ({
+    x: dir === "prev" ? -300 : 300,
+    rotateZ: dir === "prev" ? -15 : 15,
+    opacity: 0,
+    scale: 0.92
+  }),
+  center: {
+    x: 0,
+    rotateZ: 0,
+    opacity: 1,
+    scale: 1,
+    transition: {
+      x: { type: "spring", stiffness: 300, damping: 28 },
+      rotateZ: { type: "spring", stiffness: 300, damping: 28 },
+      opacity: { duration: 0.2 },
+      scale: { duration: 0.2 }
+    }
+  },
+  exit: (dir) => ({
+    x: dir === "prev" ? 500 : -500,
+    rotateZ: dir === "prev" ? 25 : -25,
+    opacity: 0,
+    scale: 0.92,
+    transition: {
+      x: { duration: 0.28, ease: "easeOut" },
+      rotateZ: { duration: 0.28, ease: "easeOut" },
+      opacity: { duration: 0.22 },
+      scale: { duration: 0.22 }
+    }
+  })
+};
+
+const SWIPE_DISTANCE = 80;
+const SWIPE_VELOCITY = 400;
+const SNAP_BACK = { type: "spring", stiffness: 300, damping: 22 };
+
+// One song card. Each card owns its drag position, so the card leaving keeps flying from where
+// the finger let go (a shared position used to snap it back to the middle first: the glitch).
+// Forwards its ref: AnimatePresence's popLayout mode measures the card through it.
+const SwipeCard = forwardRef(function SwipeCard({ direction, onSwipe, onTap, children }, ref) {
+  const x = useMotionValue(0);
+  const rotate = useTransform(x, [-200, 200], [-15, 15]);
+  const skipOpacity = useTransform(x, [-120, -20], [1, 0]);
+  const prevOpacity = useTransform(x, [20, 120], [0, 1]);
+
+  const handleDragEnd = (event, info) => {
+    const distance = info.offset.x;
+    const velocity = info.velocity.x;
+    if (distance < -SWIPE_DISTANCE || velocity < -SWIPE_VELOCITY) onSwipe("next");
+    else if (distance > SWIPE_DISTANCE || velocity > SWIPE_VELOCITY) onSwipe("prev");
+    // Back to the middle; if the song changed, this card's exit animation takes over instead
+    animate(x, 0, SNAP_BACK);
+  };
+
+  return (
+    <motion.div
+      ref={ref}
+      custom={direction}
+      variants={cardVariants}
+      initial="enter"
+      animate="center"
+      exit="exit"
+      className={styles.minimalPlayer}
+      drag="x"
+      dragConstraints={{ left: -400, right: 400 }}
+      onDragEnd={handleDragEnd}
+      style={{ x, rotate }}
+      onTap={onTap}
+    >
+      {children}
+
+      {/* Tinder-style SKIP and PREV visual stamp overlays */}
+      <motion.div className={styles.skipBadge} style={{ opacity: skipOpacity }}>
+        <span>SKIP</span>
+      </motion.div>
+      <motion.div className={styles.prevBadge} style={{ opacity: prevOpacity }}>
+        <span>PREV</span>
+      </motion.div>
+    </motion.div>
+  );
+});

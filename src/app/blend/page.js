@@ -7,7 +7,13 @@ import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } 
 import Link from "next/link";
 import { supabase, isSupabaseActive } from "@/lib/supabase";
 import { shareOrCopy } from "@/lib/toast";
-import { apiUrl, siteUrl } from "@/lib/api";
+import { siteUrl } from "@/lib/api";
+import { searchSongs, shuffle } from "@/lib/catalog";
+import { useCloseOnBack } from "@/lib/backButton";
+
+// Both tastes as songs, a different pick of each on every blend
+const fetchTastes = (mine, theirs) => Promise.all([mine, theirs].map((q) =>
+  searchSongs(q).then((tracks) => shuffle(tracks).slice(0, 8)).catch(() => [])));
 
 const FRIEND_PROFILES = [
   {
@@ -67,6 +73,8 @@ export default function Blend() {
   const [score, setScore] = useState(null);
   const [loadingBlend, setLoadingBlend] = useState(false);
   const [incomingInvite, setIncomingInvite] = useState(null);
+  // Back from a blend result returns to picking a friend
+  useCloseOnBack(phase === "result", () => reset());
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -86,15 +94,7 @@ export default function Blend() {
     setLoadingBlend(true);
 
     try {
-      const [myRes, friendRes] = await Promise.all([
-        fetch(apiUrl(`/api/search?q=${encodeURIComponent(myQuery)}`)),
-        fetch(apiUrl(`/api/search?q=${encodeURIComponent(inviter.query)}`)),
-      ]);
-      const myData = await myRes.json();
-      const friendData = await friendRes.json();
-
-      const myTracks = myData.tracks?.slice(0, 8) || [];
-      const friendTracks = friendData.tracks?.slice(0, 8) || [];
+      const [myTracks, friendTracks] = await fetchTastes(myQuery, inviter.query);
 
       const combined = [];
       const maxLen = Math.max(myTracks.length, friendTracks.length);
@@ -164,15 +164,7 @@ export default function Blend() {
 
     // Fetch tracks for both users' taste
     try {
-      const [myRes, friendRes] = await Promise.all([
-        fetch(apiUrl(`/api/search?q=${encodeURIComponent(myQuery)}`)),
-        fetch(apiUrl(`/api/search?q=${encodeURIComponent(selectedFriend.query)}`)),
-      ]);
-      const myData = await myRes.json();
-      const friendData = await friendRes.json();
-
-      const myTracks = myData.tracks?.slice(0, 8) || [];
-      const friendTracks = friendData.tracks?.slice(0, 8) || [];
+      const [myTracks, friendTracks] = await fetchTastes(myQuery, selectedFriend.query);
 
       // Interleave tracks (alternating) and shuffle slightly
       const combined = [];

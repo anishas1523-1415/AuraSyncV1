@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.4.0",
     "@capgo/capacitor-media-session": "^8.0.24",
     "@clerk/nextjs": "^5.1.4",

@@ -22,17 +22,17 @@
   align-items: center;
   justify-content: center;
 
-  /* Glassmorphic */
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /* Tinted glass in the bubble's own colour (a near-black fill read as dark holes) */
+  background: radial-gradient(circle at 32% 28%,
+    color-mix(in srgb, var(--bubble-color) 34%, transparent),
+    color-mix(in srgb, var(--bubble-color) 10%, transparent) 70%);
 
   /* Neon border + glow from --bubble-color */
   border: 1.5px solid var(--bubble-color);
   box-shadow:
     0 0 18px var(--bubble-color),
     0 0 40px color-mix(in srgb, var(--bubble-color) 40%, transparent),
-    inset 0 0 24px rgba(0, 0, 0, 0.45);
+    inset 0 0 26px color-mix(in srgb, var(--bubble-color) 28%, transparent);
 
   font-weight: 800;
   font-size: 0.72rem;
@@ -53,7 +53,7 @@
   box-shadow:
     0 0 30px var(--bubble-color),
     0 0 70px color-mix(in srgb, var(--bubble-color) 50%, transparent),
-    inset 0 0 30px rgba(0, 0, 0, 0.3);
+    inset 0 0 30px color-mix(in srgb, var(--bubble-color) 35%, transparent);
 }
 
 .forYouBubble {
@@ -79,13 +79,6 @@
     0 0 80px rgba(142, 84, 233, 0.5),
     inset 0 0 30px rgba(236, 72, 153, 0.4) !important;
 }
-
-.bubble:nth-child(even) {
-  animation-duration: 11s;
-  animation-direction: alternate-reverse;
-}
-
-.bubble:nth-child(3n) { animation-duration: 7.5s; }
 
 @keyframes floatBubble {
   0%   { transform: translateY(0px)   rotate(0deg);   }

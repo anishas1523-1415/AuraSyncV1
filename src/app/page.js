@@ -12,19 +12,21 @@ const INITIAL_BUBBLES = [
   { id: "focus",       name: "FOCUS",    color: "#8e54e9", path: "/category/focus",    size: 120 },
   { id: "workout",     name: "WORKOUT",  color: "#ff4500", path: "/category/workout",  size: 135 },
   { id: "sleep",       name: "SLEEP",    color: "#4ca1af", path: "/category/sleep",    size: 115 },
-  { id: "tamil",       name: "TAMIL",    color: "#f7971e", path: "/category/tamil",    size: 125 },
+  { id: "tamil",       name: "TAMIL",    color: "#f7971e", path: "/trends",            size: 125 }, // floating Tamil dials
   { id: "electronic",  name: "ELECTRO",  color: "#b224ef", path: "/category/electronic", size: 118 },
 ];
 
+// Where each bubble sits, as fractions of the free space (map size minus the bubble's size), so
+// the layout keeps its shape on any screen without bubbles overlapping or spilling off the edge
 const POSITIONS = [
-  { top: "5%",  left: "8%" },
-  { top: "4%",  left: "64%" },
-  { top: "22%", left: "34%" },
-  { top: "46%", left: "33%" },
-  { top: "28%", left: "5%"  },
-  { top: "44%", left: "68%" },
-  { top: "62%", left: "12%" },
-  { top: "64%", left: "52%" },
+  { x: 0.02, y: 0.02 }, // chill
+  { x: 0.98, y: 0.07 }, // trending
+  { x: 0.50, y: 0.33 }, // for you
+  { x: 0.56, y: 0.65 }, // focus
+  { x: 0.00, y: 0.56 }, // workout
+  { x: 1.00, y: 0.46 }, // sleep
+  { x: 0.08, y: 0.90 }, // tamil
+  { x: 0.60, y: 0.92 }, // electro (clear of the dial button, bottom right)
 ];
 
 // Taste-profile genres mapped onto existing category pages
@@ -71,22 +73,30 @@ export default function Home() {
       <TopBar />
       <div className={styles.spatialMap}>
         {bubbles.map((bubble, i) => {
-          const pos = POSITIONS[i] || { top: `${10 + i * 12}%`, left: `${i % 2 === 0 ? 15 : 50}%` };
+          const pos = POSITIONS[i] || { x: (i % 2) * 0.9, y: Math.min(0.95, i * 0.12) };
           const isForYou = bubble.id === "foryou";
+          // Shrinks a little on short screens so the eight bubbles still fit apart
+          const size = `min(${bubble.size}px, ${(bubble.size / 8.9).toFixed(2)}vh)`;
           return (
             <Link
               key={bubble.id}
               href={bubble.path}
-              // Clamp to the right edge so large bubbles are not clipped on narrow phones
-              style={{ position: "absolute", top: pos.top, left: `min(${pos.left}, calc(100% - ${bubble.size}px))`, textDecoration: "none" }}
+              style={{
+                position: "absolute",
+                left: `calc((100% - ${size}) * ${pos.x})`,
+                top: `calc((100% - ${size}) * ${pos.y})`,
+                textDecoration: "none",
+              }}
             >
               <div
                 className={`${styles.bubble} ${isForYou ? styles.forYouBubble : ""}`}
                 style={{
-                  width: bubble.size,
-                  height: bubble.size,
+                  width: size,
+                  height: size,
                   "--bubble-color": bubble.color,
-                  animationDelay: `${i * 1.2}s`,
+                  // Own rhythm per bubble, already mid-float on arrival (not all moving in step)
+                  animationDuration: `${8 + (i % 3) * 1.7}s`,
+                  animationDelay: `-${i * 1.9}s`,
                 }}
               >
                 <span>{bubble.name}</span>

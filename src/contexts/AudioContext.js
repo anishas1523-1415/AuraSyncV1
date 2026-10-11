@@ -6,6 +6,7 @@ import {
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
+import { relatedSongs } from "@/lib/catalog";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
 // On the web it wraps navigator.mediaSession, so one adapter covers both.
@@ -48,9 +49,9 @@ const AUDIO_CACHE = "aurasynq_offline_audio";
 const HISTORY_LIMIT = 50;
 const AUTO_CACHE_LIMIT = 25;          // recently played songs kept for offline replay
 const AUTO_CACHE_AFTER_SECONDS = 30;  // only cache songs that were actually listened to
-const RADIO_BATCH = 8;
+const RADIO_BATCH = 10;
 const WARM_AHEAD = 2;                 // upcoming queue songs resolved ahead of time
-const WARM_LIST_TOP = 2;              // top songs of a freshly opened list
+const WARM_LIST_TOP = 3;              // top songs of a freshly opened list
 const FIRST_BUFFER_TIMEOUT_MS = 30000; // a cold song can take a while to resolve
 const STALL_TIMEOUT_MS = 15000;       // mid-song stall before reconnecting
 const MAX_STREAM_RECOVERIES = 2;
@@ -124,7 +125,6 @@ const fetchAudioForCache = async (url) => {
   });
 };
 const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
-const cleanArtistName = (artist = "") => artist.replace(/\s*-\s*Topic$/i, "").replace(/VEVO$/i, "").trim();
 
 // The Android app streams straight from YouTube on the phone (src/lib/ondevice), loaded on demand
 let onDevicePromise = null;
@@ -262,7 +262,7 @@ export function AudioProvider({ children }) {
 
   const blobUrlRef = useRef(null);
   const onDeviceBlobRef = useRef({ id: null, blob: null }); // song downloaded on the phone
-  const onDeviceDownloadRef = useRef({ id: null, promise: null }); // its download in progress
+  const onDeviceDownloadRef = useRef({ id: null, promise: null, active: false }); // its download
   const mediaSourceUrlRef = useRef(null); // object URL of a progressive MediaSource
   const unlockedRef = useRef(false);        // audio element has played after a user gesture (iOS)
   const consecutiveErrorsRef = useRef(0);
@@ -624,6 +624,15 @@ export function AudioProvider({ children }) {
       startNetwork(blobUrlRef.current);
     };
 
+    // Remember the song's download; while it runs, the stall watchdog leaves it alone (it has its
+    // own timeouts and retries, and a slow phone connection is not a dead one)
+    const trackDownload = (download) => {
+      const entry = { id: trackId, promise: download, active: true };
+      onDeviceDownloadRef.current = entry;
+      download.then(() => { entry.active = false; }, () => { entry.active = false; });
+      return download;
+    };
+
     // Problems in the player's buffer (not the download), so the downloaded file is still usable
     const mediaSourceError = (message) => Object.assign(new Error(message), { fromMediaSource: true });
 
@@ -695,7 +704,7 @@ export function AudioProvider({ children }) {
           pump();
         },
       });
-      onDeviceDownloadRef.current = { id: trackId, promise: download };
+      trackDownload(download);
       download.then((blob) => {
         downloaded = true;
         if (isCurrent()) onDeviceBlobRef.current = { id: trackId, blob };
@@ -713,8 +722,7 @@ export function AudioProvider({ children }) {
           // Prefetched or played before: start the (finished or nearly finished) file directly
           const known = ondevice.peekTrack(trackId);
           if (known || typeof MediaSource === "undefined") {
-            const download = known || ondevice.getTrackBlob(trackId);
-            onDeviceDownloadRef.current = { id: trackId, promise: download };
+            const download = trackDownload(known || ondevice.getTrackBlob(trackId));
             return download.then(playDownloadedFile);
           }
           return streamProgressively(ondevice).catch((err) => {
@@ -725,8 +733,7 @@ export function AudioProvider({ children }) {
             let download = onDeviceDownloadRef.current.promise;
             if (!err?.fromMediaSource || onDeviceDownloadRef.current.id !== trackId || !download) {
               ondevice.forgetTrack(trackId);
-              download = ondevice.getTrackBlob(trackId);
-              onDeviceDownloadRef.current = { id: trackId, promise: download };
+              download = trackDownload(ondevice.getTrackBlob(trackId));
             }
             return download.then(playDownloadedFile);
           });
@@ -755,22 +762,19 @@ export function AudioProvider({ children }) {
     });
   };
 
+  // Songs in the same mood as `seed` (YouTube Music's radio for it) that haven't played lately
+  const radioFor = async (seed, exclude) => {
+    const known = new Set([...exclude, ...playHistoryRef.current.slice(0, 30)].map(t => t.id));
+    const related = await relatedSongs(seed);
+    return related.filter(t => t?.id && !known.has(t.id) && !LONG_FORM.test(t.title || "")).slice(0, RADIO_BATCH);
+  };
+
   // Keep the vibe going: when the queue runs out, append similar tracks instead of looping
   const extendQueueWithRadio = (seed) => {
     if (radioPendingRef.current) return radioPendingRef.current;
     const run = (async () => {
       try {
-        const artist = cleanArtistName(seed.artist);
-        const query = artist && artist !== "Unknown Artist"
-          ? `${artist} best songs`
-          : `${shortTitle(seed.title)} similar songs`;
-        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
-        if (!res.ok) return [];
-        const data = await res.json();
-        const known = new Set([...queueRef.current, ...playHistoryRef.current].map(t => t.id));
-        const fresh = (data.tracks || [])
-          .filter(t => t?.id && !known.has(t.id) && !LONG_FORM.test(t.title || ""))
-          .slice(0, RADIO_BATCH);
+        const fresh = await radioFor(seed, queueRef.current);
         if (fresh.length) {
           commitQueue([...queueRef.current, ...fresh]);
           originalQueueRef.current = [...originalQueueRef.current, ...fresh];
@@ -785,6 +789,24 @@ export function AudioProvider({ children }) {
     })();
     radioPendingRef.current = run;
     return run;
+  };
+
+  // Queue "Sync": replace what's coming up with fresh songs that match the current one
+  const syncUpNext = async () => {
+    const current = currentTrackRef.current;
+    if (!current) return false;
+    const index = queueRef.current.findIndex(t => t.id === current.id);
+    const played = index === -1 ? [current] : queueRef.current.slice(0, index + 1);
+    const fresh = await radioFor(current, played);
+    if (!fresh.length) {
+      toast("No new songs found right now — try again in a moment", { variant: "error" });
+      return false;
+    }
+    const nextQueue = [...played, ...fresh];
+    originalQueueRef.current = nextQueue;
+    commitQueue(nextQueue);
+    warmNextTrack();
+    return true;
   };
 
   const playNext = (shouldAutoPlay = !audioRef.current?.paused) => {
@@ -925,19 +947,31 @@ export function AudioProvider({ children }) {
     fetch(`${streamKey(id)}&warm=1`).catch(() => warmedIdsRef.current.delete(id));
   };
 
-  // Resolve upcoming songs on the server ahead of time so skipping feels instant
+  // Resolve upcoming songs ahead of time so skipping feels instant. On the phone the very next
+  // song is downloaded and the one after only looked up (a few KB), to spare mobile data.
   const warmNextTrack = () => {
     const currentQ = queueRef.current;
     const index = currentQ.findIndex(t => t.id === currentTrackRef.current?.id);
     if (index === -1) return;
-    currentQ.slice(index + 1, index + 1 + WARM_AHEAD).forEach(warmTrack);
+    const upcoming = currentQ.slice(index + 1, index + 1 + WARM_AHEAD);
+    if (!isMobileApp) {
+      upcoming.forEach(warmTrack);
+      return;
+    }
+    if (upcoming[0]) warmTrack(upcoming[0]);
+    const ids = upcoming.slice(1).map(extractId).filter(id => id && YOUTUBE_ID.test(id));
+    if (ids.length) loadOnDevice().then((ondevice) => ondevice?.preResolve(ids));
   };
 
   // Lists (categories, Discover, Trends) pre-resolve the songs most likely to be tapped first
   const prefetchTracks = (tracks, count = WARM_LIST_TOP) => {
-    // Phone: don't spend mobile data on songs that may never play; just have the session ready
+    // Phone: only look the top songs up (no audio download), so a tap starts streaming at once
     if (isMobileApp) {
-      loadOnDevice().then((ondevice) => ondevice?.warmUp());
+      const ids = (tracks || []).slice(0, count).map(extractId).filter(id => id && YOUTUBE_ID.test(id));
+      loadOnDevice().then((ondevice) => {
+        ondevice?.warmUp();
+        if (ids.length) ondevice?.preResolve(ids);
+      });
       return;
     }
     (tracks || []).slice(0, count).forEach(warmTrack);
@@ -1246,6 +1280,13 @@ export function AudioProvider({ children }) {
       stallTimerRef.current = null;
       const a = audioRef.current;
       if (!a || a.paused || !currentTrackRef.current || a.readyState >= 3) return;
+      // The phone is still fetching this song: its data will arrive (or the download fails and
+      // retries on its own), so don't skip a song just because the connection is slow
+      const download = onDeviceDownloadRef.current;
+      if (download.active && download.id === extractId(currentTrackRef.current)) {
+        startStallWatch();
+        return;
+      }
       if (recoverStream()) {
         toast("Weak connection — reconnecting…");
         startStallWatch();
@@ -1303,7 +1344,7 @@ export function AudioProvider({ children }) {
 
   return (
     <AudioContext.Provider value={{
-      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle,
+      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle, syncUpNext,
       likedTracks, toggleLikeTrack, isTrackLiked,
       customPlaylists, setCustomPlaylists, createPlaylist, deletePlaylist, renamePlaylist, addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
       contextPlaylist, setContextPlaylist,
