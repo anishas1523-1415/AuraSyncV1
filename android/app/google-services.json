@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "748353593879",
+    "firebase_url": "https://aurasynq-default-rtdb.firebaseio.com",
+    "project_id": "aurasynq",
+    "storage_bucket": "aurasynq.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:748353593879:android:49a67675c851a18f187252",
+        "android_client_info": {
+          "package_name": "com.aurasynq.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "748353593879-mjdhminlrmiocq1el54v0oucp6f2g1o0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aurasynq.app",
+            "certificate_hash": "479366c1d4d3ea0f6011b8444229c46c42d4fcc4"
+          }
+        },
+        {
+          "client_id": "748353593879-v2sec65l8t3c8m10rqcplmc04j4cq7r1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuleoYnEd_uDVr4VFDHH_5MmKMu8CbHMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "748353593879-v2sec65l8t3c8m10rqcplmc04j4cq7r1.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
