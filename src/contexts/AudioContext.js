@@ -588,6 +588,9 @@ export function AudioProvider({ children }) {
 
     if (!audio) return;
     revokeBlobUrl();
+    // The previous song's progressive stream is over: a downloaded next song must start at 0:00,
+    // not "take over" at the old song's position
+    mediaSourceUrlRef.current = null;
 
     const trackId = extractId(track);
     const isYouTube = !!trackId && YOUTUBE_ID.test(trackId);

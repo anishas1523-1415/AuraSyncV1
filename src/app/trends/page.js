@@ -9,7 +9,7 @@ import { toast } from "@/lib/toast";
 import { mixSongs } from "@/lib/catalog";
 import { TRENDS_SEEDS } from "@/app/category/[slug]/categories";
 
-const ROW_HEIGHT = 160; // a dial, its label and its float fit before the next dial in the column
+const ROW_HEIGHT = 136; // neighbouring dials touch and a few overlap a little, but none hide each other
 
 // Stable per-song "randomness" so a dial keeps its rhythm across re-renders
 const hash = (text = "") => {
@@ -18,8 +18,8 @@ const hash = (text = "") => {
   return (h >>> 0) / 4294967295;
 };
 
-// The original scattered field: two staggered columns shifting sideways row by row,
-// four dial sizes. Spaced in pixels so dials never cover each other or their labels.
+// The original scattered field: two staggered columns shifting sideways row by row, four dial
+// sizes, packed into a loose cluster where neighbours overlap slightly (higher dials in front)
 const layoutBubble = (track, i) => {
   const size = 90 + (i % 4) * 14;
   const row = Math.floor(i / 2);
@@ -28,7 +28,7 @@ const layoutBubble = (track, i) => {
   return {
     size,
     top: 12 + row * ROW_HEIGHT + (col === 0 ? 0 : ROW_HEIGHT / 2),
-    left: (col === 0 ? 8 : 48) + (row % 3) * 5, // percent
+    left: (col === 0 ? 9 : 44) + (row % 3) * 5, // percent
     duration: 5 + r * 3,
     delay: -r * 8,
   };
@@ -114,7 +114,10 @@ export default function Trends() {
               <div
                 key={track.id}
                 className={styles.floatLayer}
-                style={{ top, left: `${left}%`, width: size, animationDuration: `${duration}s`, animationDelay: `${delay}s` }}
+                style={{
+                  top, left: `${left}%`, width: size, zIndex: tracks.length - i,
+                  animationDuration: `${duration}s`, animationDelay: `${delay}s`,
+                }}
               >
                 <button
                   type="button"

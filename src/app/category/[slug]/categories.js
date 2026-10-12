@@ -12,7 +12,7 @@ export const CATEGORY_MAP = {
   },
   workout: {
     title: "Workout Beast", color: "#FF4500", emoji: "💪",
-    seeds: ["workout phonk", "gym motivation songs", "hip hop workout", "edm workout", "tamil mass songs", "power rock workout"],
+    seeds: ["workout phonk", "gym motivation songs", "hip hop workout", "edm workout", "tamil workout songs", "power rock workout"],
   },
   sleep: {
     title: "Sleep Sounds", color: "#483D8B", emoji: "🌙",
