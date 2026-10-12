@@ -277,6 +277,12 @@
   right: 24px;
 }
 
+/* Add to Playlist sits under Like, in the same corner */
+.cardPlaylistBtn {
+  top: 74px;
+  right: 24px;
+}
+
 .cardLikeBtn.liked {
   color: #ec4899;
   border-color: rgba(236, 72, 153, 0.3);

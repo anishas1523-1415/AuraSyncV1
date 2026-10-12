@@ -83,7 +83,8 @@ export default function Home() {
               href={bubble.path}
               style={{
                 position: "absolute",
-                left: `calc((100% - ${size}) * ${pos.x})`,
+                // 14px in from each screen edge so no bubble touches the side
+                left: `calc(14px + (100% - 28px - ${size}) * ${pos.x})`,
                 top: `calc((100% - ${size}) * ${pos.y})`,
                 textDecoration: "none",
               }}

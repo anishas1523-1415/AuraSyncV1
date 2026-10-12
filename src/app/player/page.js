@@ -3,12 +3,13 @@ import { useState, useEffect, useRef, forwardRef } from "react";
 import { useAudio, useAudioProgress } from "@/contexts/AudioContext";
 import styles from "./page.module.css";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share } from "@phosphor-icons/react";
+import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share, ListPlus } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { shareOrCopy } from "@/lib/toast";
 import { siteUrl } from "@/lib/api";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
+import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 
 export default function Player() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function Player() {
   const [showLyrics, setShowLyrics] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState("next");
+  const [playlistTrack, setPlaylistTrack] = useState(null); // song being added to a playlist
   useCloseOnBack(showLyrics, () => setShowLyrics(false));
   useCloseOnBack(showQueue, () => setShowQueue(false));
 
@@ -188,6 +190,19 @@ export default function Player() {
                 <Heart size={24} weight={isLiked ? "fill" : "regular"} />
               </button>
 
+              <button 
+                className={`${styles.cardActionBtn} ${styles.cardPlaylistBtn}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
+                  setPlaylistTrack(currentTrack);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                title="Add to Playlist"
+              >
+                <ListPlus size={22} />
+              </button>
+
               <div className={styles.coverContainer} onClick={(e) => e.stopPropagation()}>
                 <img 
                   src={currentTrack.cover} 
@@ -344,6 +359,11 @@ export default function Player() {
             })}
           </div>
         </div>
+      )}
+
+      {/* Rendered at the page level so the sheet covers the whole screen */}
+      {playlistTrack && (
+        <AddToPlaylistModal track={playlistTrack} onClose={() => setPlaylistTrack(null)} />
       )}
     </div>
   );

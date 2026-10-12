@@ -1,18 +1,20 @@
+/* Bleeds past the page padding so the bubble field reaches the screen edges */
 .container {
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  padding: 0 1rem;
+  padding: 0 2rem; /* keeps the top bar where it was (page padding + its own) */
+  margin: 0 -1rem;
   overflow: hidden;
 }
 
+/* Full screen width and no clipping: a clipped glow drew a visible box around the bubbles */
 .spatialMap {
   flex: 1;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   background: radial-gradient(circle at 50% 50%, rgba(138,43,226,0.04), transparent 70%);
-  margin: -1rem;
-  margin-top: 0;
+  margin: 0 -2rem -1rem;
 }
 
 .bubble {

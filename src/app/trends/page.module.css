@@ -44,21 +44,12 @@
   font-size: 0.9rem;
 }
 
+/* The dials roam this whole area (no scrolling). Not clipped: the dials already stay inside it,
+   and clipping cut the playing dial's glow into a hard line. */
 .spatialMap {
   flex: 1;
   position: relative;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.spatialMap::-webkit-scrollbar { display: none; }
-
-.field {
-  position: relative;
-  width: 100%;
-  margin-top: 0.5rem;
+  overflow: visible;
 }
 
 .loader {
@@ -81,23 +72,17 @@
   white-space: nowrap;
 }
 
-/* Each dial floats on its own clock (duration and phase set per song), the original
-   bob-and-tilt motion; the dial inside handles the press so the two never fight */
-.floatLayer {
+/* One dial and its name; its slow drift is set from JS. Hidden until it has a position. */
+.dial {
   position: absolute;
+  left: 0;
+  top: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  animation-name: floatBubble;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
+  opacity: 0;
+  transition: opacity 0.6s ease;
   will-change: transform;
-}
-
-@keyframes floatBubble {
-  0% { transform: translateY(0px) rotate(0deg); }
-  100% { transform: translateY(-15px) rotate(5deg); }
 }
 
 .trackBubble {
@@ -149,5 +134,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .floatLayer { animation: none; }
+  .dial { animation: none; }
 }
