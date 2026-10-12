@@ -26,6 +26,14 @@ const config: CapacitorConfig = {
   // Debug builds otherwise log every native call result to the console, including each ~1 MB
   // audio chunk as base64 text, which noticeably slowed down streaming
   loggingBehavior: 'none',
+  plugins: {
+    // Google sign-in uses the phone's native account picker; the resulting Google token then signs
+    // in to Firebase through the JavaScript SDK (skipNativeAuth), shared with the website code
+    FirebaseAuthentication: {
+      skipNativeAuth: true,
+      providers: ['google.com'],
+    },
+  },
 };
 
 export default config;

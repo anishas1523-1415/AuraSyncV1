@@ -591,3 +591,166 @@
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
 }
 
+
+/* ─── Account sync card ─── */
+.syncCard {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+}
+
+.syncIcon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #00ffcc;
+  background: rgba(0, 255, 204, 0.1);
+  border: 1px solid rgba(0, 255, 204, 0.25);
+}
+
+.syncInfo { flex: 1; min-width: 0; }
+.syncInfo h4 { font-size: 0.92rem; font-weight: 700; }
+.syncInfo p { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.1rem; }
+
+.signInChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ─── Editable name ─── */
+.editName {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+  padding: 4px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.nameForm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.nameInput {
+  width: 220px;
+  padding: 0.5rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+}
+
+.nameSave {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  cursor: pointer;
+}
+
+/* ─── Settings panels ─── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 1.25rem 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.toggleRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  cursor: pointer;
+}
+
+.toggleText { display: flex; flex-direction: column; gap: 0.1rem; }
+.toggleText strong { font-size: 0.85rem; font-weight: 600; }
+.toggleText small { font-size: 0.72rem; color: var(--text-muted); }
+
+.switchInput {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background 0.2s ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.switchInput:checked + .switch { background: linear-gradient(135deg, #a855f7, #ec4899); }
+.switchInput:checked + .switch::after { transform: translateX(18px); }
+
+.panelBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.panelDanger {
+  color: #fda4af;
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(244, 63, 94, 0.08);
+}

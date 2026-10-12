@@ -1,55 +1,43 @@
 import { db } from "./firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
+
+// Each listener's library is one Firestore document, users/{uid}; the security rules only let
+// that signed-in person read or write it. Every call resolves to true when it reached the cloud.
 
 // Firestore rejects `undefined` field values; a JSON round-trip drops them
 const sanitize = (value) => JSON.parse(JSON.stringify(value ?? null));
 
-// Synchronize play history to Cloud
-export const syncHistoryToCloud = async (history, userId) => {
-  if (!userId || !db) return;
+const save = async (userId, fields, what) => {
+  if (!userId || !db) return false;
   try {
-    const userDocRef = doc(db, "users", userId);
-    await setDoc(userDocRef, { playHistory: sanitize(history) }, { merge: true });
+    await setDoc(doc(db, "users", userId), fields, { merge: true });
+    return true;
   } catch (err) {
-    console.warn("AuraSynq Debug: Failed to sync history to cloud", err);
+    console.warn(`AuraSynq: couldn't sync ${what} to the cloud`, err);
+    return false;
   }
 };
 
-// Synchronize liked tracks to Cloud. `updatedAt` lets other devices tell newer edits (incl. unlikes) apart.
-export const syncLikedToCloud = async (likedTracks, userId, updatedAt = Date.now()) => {
-  if (!userId || !db) return;
-  try {
-    const userDocRef = doc(db, "users", userId);
-    await setDoc(userDocRef, { likedTracks: sanitize(likedTracks), likedUpdatedAt: updatedAt }, { merge: true });
-  } catch (err) {
-    console.warn("AuraSynq Debug: Failed to sync liked tracks to cloud", err);
-  }
-};
+export const syncHistoryToCloud = (history, userId) =>
+  save(userId, { playHistory: sanitize(history) }, "history");
 
-// Synchronize custom playlists to Cloud
-export const syncPlaylistsToCloud = async (playlists, userId, updatedAt = Date.now()) => {
-  if (!userId || !db) return;
-  try {
-    const userDocRef = doc(db, "users", userId);
-    await setDoc(userDocRef, { customPlaylists: sanitize(playlists), playlistsUpdatedAt: updatedAt }, { merge: true });
-  } catch (err) {
-    console.warn("AuraSynq Debug: Failed to sync playlists to cloud", err);
-  }
-};
+// `updatedAt` lets other devices tell newer edits (incl. unlikes) apart
+export const syncLikedToCloud = (likedTracks, userId, updatedAt = Date.now()) =>
+  save(userId, { likedTracks: sanitize(likedTracks), likedUpdatedAt: updatedAt }, "liked songs");
 
-// Automatically sync user profile if missing
-export const syncProfileToCloud = async (user) => {
-  if (!user || !user.id || !db) return;
-  try {
-    const fullName = (user.firstName || '') + (user.lastName ? ` ${user.lastName}` : '');
-    const userDocRef = doc(db, "users", user.id);
-    await setDoc(userDocRef, {
-      name: fullName.trim() || 'Aura User',
-      avatarUrl: user.imageUrl || null
-    }, { merge: true });
-  } catch (err) {
-    console.warn("AuraSynq Debug: Failed to sync profile to cloud", err);
-  }
+export const syncPlaylistsToCloud = (playlists, userId, updatedAt = Date.now()) =>
+  save(userId, { customPlaylists: sanitize(playlists), playlistsUpdatedAt: updatedAt }, "playlists");
+
+export const syncStatsToCloud = (stats, userId) =>
+  save(userId, { listenStats: sanitize(stats) }, "listening stats");
+
+export const syncProfileToCloud = (user) => {
+  if (!user?.id) return Promise.resolve(false);
+  return save(user.id, {
+    name: user.fullName || "Aura User",
+    avatarUrl: user.imageUrl || null,
+    email: user.email || null,
+  }, "profile");
 };
 
 // Restore the library saved from other devices.
@@ -64,10 +52,23 @@ export const loadLibraryFromCloud = async (userId) => {
       likedTracks: Array.isArray(data.likedTracks) ? data.likedTracks : [],
       customPlaylists: Array.isArray(data.customPlaylists) ? data.customPlaylists : [],
       likedUpdatedAt: Number(data.likedUpdatedAt) || 0,
-      playlistsUpdatedAt: Number(data.playlistsUpdatedAt) || 0
+      playlistsUpdatedAt: Number(data.playlistsUpdatedAt) || 0,
+      listenStats: data.listenStats && typeof data.listenStats === "object" ? data.listenStats : null,
     };
   } catch (err) {
-    console.warn("AuraSynq Debug: Failed to load library from cloud", err);
+    console.warn("AuraSynq: couldn't load the library from the cloud", err);
     return null;
+  }
+};
+
+// Account deletion: remove everything stored for this listener
+export const deleteCloudLibrary = async (userId) => {
+  if (!userId || !db) return false;
+  try {
+    await deleteDoc(doc(db, "users", userId));
+    return true;
+  } catch (err) {
+    console.warn("AuraSynq: couldn't delete the cloud library", err);
+    return false;
   }
 };

@@ -1,82 +1,16 @@
-import { SignIn } from "@/lib/clerk";
+"use client";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAccount } from "@/lib/auth";
+import AuthScreen from "@/components/AuthScreen";
 
 export default function SignInPage() {
-  return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      minHeight: "100vh",
-      background: "linear-gradient(145deg, #1a0533 0%, #0d0d1a 50%, #0a0a12 100%)",
-      padding: "1rem"
-    }}>
-      <div style={{ textAlign: "center" }}>
-        <img
-          src="/logo-emblem.png"
-          alt=""
-          width={112}
-          height={91}
-          style={{ display: "block", margin: "0 auto 0.5rem", filter: "drop-shadow(0 0 18px rgba(168, 85, 247, 0.35))" }}
-        />
-        <h1 style={{
-          fontSize: "2rem",
-          fontWeight: 800,
-          background: "linear-gradient(135deg, #a855f7, #ec4899)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          marginBottom: "0.25rem",
-          letterSpacing: "-0.5px"
-        }}>AuraSynq</h1>
-        <p style={{
-          color: "#a1a1aa",
-          fontSize: "0.9rem",
-          marginBottom: "1.5rem"
-        }}>Sign in to start vibing</p>
-        <SignIn 
-          appearance={{
-            variables: {
-              colorPrimary: "#a855f7",
-              colorBackground: "#18181b",
-              colorInputBackground: "#27272a",
-              colorText: "#fafafa",
-              colorTextSecondary: "#a1a1aa",
-              colorInputText: "#fafafa",
-              borderRadius: "12px",
-              fontSize: "0.95rem"
-            },
-            elements: {
-              card: { 
-                backgroundColor: "#18181b",
-                border: "1px solid #3f3f46",
-                boxShadow: "0 25px 50px rgba(0,0,0,0.5)"
-              },
-              headerTitle: { color: "#fafafa", fontSize: "1.2rem" },
-              headerSubtitle: { color: "#a1a1aa" },
-              socialButtonsBlockButton: { 
-                backgroundColor: "#27272a",
-                border: "1px solid #3f3f46",
-                color: "#fafafa"
-              },
-              socialButtonsBlockButtonText: { color: "#fafafa" },
-              formFieldLabel: { color: "#d4d4d8" },
-              formFieldInput: { 
-                backgroundColor: "#27272a",
-                border: "1px solid #3f3f46",
-                color: "#fafafa"
-              },
-              footerActionLink: { color: "#c084fc" },
-              footerActionText: { color: "#a1a1aa" },
-              dividerLine: { backgroundColor: "#3f3f46" },
-              dividerText: { color: "#71717a" },
-              formButtonPrimary: {
-                backgroundColor: "#a855f7",
-                color: "#ffffff",
-                fontWeight: 600
-              }
-            }
-          }}
-        />
-      </div>
-    </div>
-  );
+  const router = useRouter();
+  const { isSignedIn } = useAccount();
+
+  useEffect(() => {
+    if (isSignedIn) router.replace("/");
+  }, [isSignedIn]);
+
+  return <AuthScreen onDone={() => router.replace("/")} />;
 }

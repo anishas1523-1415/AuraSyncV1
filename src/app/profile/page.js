@@ -1,20 +1,56 @@
 "use client";
 import styles from "./page.module.css";
-import { useUser, useClerk } from "@/lib/clerk";
+import { useAccount, authErrorMessage } from "@/lib/auth";
 import { useAudio } from "@/contexts/AudioContext";
 import { useState, useEffect, useMemo } from "react";
 import {
-  ChartBar, SignOut, MusicNote, Clock, Heart,
-  Gear, Bell, Shield, CaretRight, Play, DownloadSimple, X, Export, Trash, Pause
+  SignOut, MusicNote, Clock, Heart, Gear, Bell, Shield, CaretRight, CaretDown, Play, DownloadSimple, X,
+  Export, Trash, Pause, PencilSimple, Check, Cloud, CloudSlash, UserSwitch, SignIn, UserCircle
 } from "@phosphor-icons/react";
 import { toast } from "@/lib/toast";
 import { useCloseOnBack } from "@/lib/backButton";
+import SyncButton from "@/components/SyncButton";
+
+const timeAgo = (ms) => {
+  if (!ms) return "";
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.floor(hours / 24)} d ago`;
+};
+
+// A labelled on/off switch in the app's style
+function Toggle({ label, sub, checked, onChange }) {
+  return (
+    <label className={styles.toggleRow}>
+      <span className={styles.toggleText}>
+        <strong>{label}</strong>
+        {sub && <small>{sub}</small>}
+      </span>
+      <input type="checkbox" className={styles.switchInput} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className={styles.switch} aria-hidden="true" />
+    </label>
+  );
+}
 
 export default function Profile() {
-  const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
-  const { playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile, listenStats } = useAudio();
+  const { user, isLoaded, isSignedIn, isGuest, signOut, updateDisplayName, deleteAccount } = useAccount();
+  const {
+    playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile, listenStats,
+    settings, updateSettings, clearHistory, syncNow, isSyncing, lastSyncedAt, isCloudSynced, deleteCloudData
+  } = useAudio();
   const [downloadedSongs, setDownloadedSongs] = useState([]);
+  const [openPanel, setOpenPanel] = useState(null); // which settings group is expanded
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [, setClock] = useState(0);
+
+  // Keep "synced 2 min ago" current while the tab is open
+  useEffect(() => {
+    const timer = setInterval(() => setClock((c) => c + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Memoize taste profile to avoid expensive recalculation on every render
   const tasteProfile = useMemo(() => getUserTasteProfile(), [playHistory, getUserTasteProfile]);
@@ -94,16 +130,18 @@ export default function Profile() {
 
   const showInstallButton = !isStandalone && (deferredPrompt || isIOS);
 
-  const displayName = isLoaded && user
-    ? user.fullName || user.firstName || "Music Lover"
-    : "Loading...";
+  const displayName = !isLoaded
+    ? "Loading..."
+    : user
+      ? user.fullName || user.email?.split("@")[0] || "Music Lover"
+      : "Guest Listener";
   const avatarUrl = isLoaded && user
     ? user.imageUrl
     : null;
   const email = isLoaded && user
-    ? user.primaryEmailAddress?.emailAddress
-    : "";
-  const memberSince = isLoaded && user
+    ? user.email
+    : "Listening without an account";
+  const memberSince = isLoaded && user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "";
 
@@ -112,13 +150,68 @@ export default function Profile() {
   const songsPlayed = Math.max(listenStats?.trackPlays || 0, playHistory.length);
   const uniqueArtists = [...new Set(playHistory.map(t => t.artist))].length;
 
-  const handleSignOut = () => signOut({ redirectUrl: "/" });
+  const handleSignOut = async () => {
+    if (isSignedIn && !confirm("Sign out of AuraSynq? Your library stays saved to your account.")) return;
+    await signOut();
+  };
 
-  const settings = [
-    { icon: Bell, label: "Notifications", sub: "Manage alerts" },
-    { icon: Shield, label: "Privacy", sub: "Data & permissions" },
-    { icon: Gear, label: "Preferences", sub: "App settings" },
+  const saveName = async () => {
+    const name = nameDraft.trim();
+    setEditingName(false);
+    if (!name || name === user?.fullName) return;
+    try {
+      await updateDisplayName(name);
+      toast("Name updated", { variant: "success" });
+    } catch (err) {
+      toast(authErrorMessage(err) || "Couldn't update your name", { variant: "error" });
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!confirm("Delete your AuraSynq account? Your liked songs, playlists and history will be removed from the cloud. This can't be undone.")) return;
+    try {
+      await deleteCloudData();
+      await deleteAccount();
+      toast("Your account was deleted");
+    } catch (err) {
+      const message = authErrorMessage(err);
+      if (message) toast(message, { variant: "error" });
+    }
+  };
+
+  const settingGroups = [
+    { id: "notifications", icon: Bell, label: "Notifications", sub: "Pop-ups and vibration" },
+    { id: "privacy", icon: Shield, label: "Privacy", sub: "History and your data" },
+    { id: "preferences", icon: Gear, label: "Preferences", sub: "Playback and data use" },
   ];
+
+  const renderPanel = (id) => {
+    if (id === "notifications") return (
+      <>
+        <Toggle label="Aura Radio pop-ups" sub="Tell me when similar songs are queued" checked={settings.radioAlerts} onChange={(v) => updateSettings({ radioAlerts: v })} />
+        <Toggle label="Vibration on taps" sub="Haptic feedback for buttons and swipes" checked={settings.haptics} onChange={(v) => updateSettings({ haptics: v })} />
+      </>
+    );
+    if (id === "privacy") return (
+      <>
+        <Toggle label="Pause listening history" sub="Songs you play won't be added to Recently Played" checked={settings.pauseHistory} onChange={(v) => updateSettings({ pauseHistory: v })} />
+        <button className={styles.panelBtn} onClick={() => { if (confirm("Clear your listening history?")) clearHistory(); }}>
+          <Trash size={16} /> Clear listening history
+        </button>
+        {isSignedIn && (
+          <button className={`${styles.panelBtn} ${styles.panelDanger}`} onClick={handleDeleteAccount}>
+            <Trash size={16} /> Delete my account
+          </button>
+        )}
+      </>
+    );
+    return (
+      <>
+        <Toggle label="Autoplay similar songs" sub="When your queue ends, keep the vibe going" checked={settings.autoplay} onChange={(v) => updateSettings({ autoplay: v })} />
+        <Toggle label="Data saver" sub="Don't pre-download the next song or keep songs offline automatically" checked={settings.dataSaver} onChange={(v) => updateSettings({ dataSaver: v })} />
+      </>
+    );
+  };
 
   return (
     <div className={styles.container}>
@@ -126,13 +219,37 @@ export default function Profile() {
       <div className={styles.hero}>
         <div className={styles.heroBg} />
         {avatarUrl ? (
-          <img src={avatarUrl} alt="Avatar" className={styles.avatar} />
+          <img src={avatarUrl} alt="Avatar" className={styles.avatar} referrerPolicy="no-referrer" />
         ) : (
           <div className={styles.avatarPlaceholder}>
-            {displayName.charAt(0).toUpperCase()}
+            {user ? displayName.charAt(0).toUpperCase() : <UserCircle size={44} />}
           </div>
         )}
-        <h1 className={styles.name}>{displayName}</h1>
+        {editingName ? (
+          <form className={styles.nameForm} onSubmit={(e) => { e.preventDefault(); saveName(); }}>
+            <input
+              className={styles.nameInput}
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              maxLength={40}
+              autoFocus
+            />
+            <button type="submit" className={styles.nameSave} title="Save name"><Check size={18} weight="bold" /></button>
+          </form>
+        ) : (
+          <h1 className={styles.name}>
+            {displayName}
+            {isSignedIn && (
+              <button
+                className={styles.editName}
+                onClick={() => { setNameDraft(user?.fullName || ""); setEditingName(true); }}
+                title="Edit name"
+              >
+                <PencilSimple size={16} />
+              </button>
+            )}
+          </h1>
+        )}
         <p className={styles.email}>{email}</p>
         {memberSince && (
           <span className={styles.memberBadge}>🎵 Member since {memberSince}</span>
@@ -156,6 +273,28 @@ export default function Profile() {
           <h3>{uniqueArtists}</h3>
           <p>Artists</p>
         </div>
+      </div>
+
+      {/* Account sync */}
+      <div className={`glass ${styles.syncCard}`}>
+        <div className={styles.syncIcon}>
+          {isSignedIn ? <Cloud size={22} weight="fill" /> : <CloudSlash size={22} />}
+        </div>
+        <div className={styles.syncInfo}>
+          <h4>{isSignedIn ? "Library sync" : "Not syncing"}</h4>
+          <p>
+            {isSignedIn
+              ? (isSyncing ? "Syncing your library…" : isCloudSynced && lastSyncedAt ? `Synced ${timeAgo(lastSyncedAt)}` : "Connecting to your account…")
+              : "Sign in to keep likes, playlists and history on every device"}
+          </p>
+        </div>
+        {isSignedIn
+          ? <SyncButton size="sm" onSync={syncNow} />
+          : (
+            <button className={styles.signInChip} onClick={() => signOut()}>
+              <SignIn size={14} weight="bold" /> Sign in
+            </button>
+          )}
       </div>
 
       {/* Aura Orb */}
@@ -316,27 +455,56 @@ export default function Profile() {
             </div>
           )}
 
-          {settings.map(({ icon: Icon, label, sub }) => (
-            <div key={label} className={styles.settingItem}>
-              <div className={styles.settingIcon}><Icon size={20} /></div>
-              <div className={styles.settingInfo}>
-                <h4>{label}</h4>
-                <p>{sub}</p>
+          {settingGroups.map(({ id, icon: Icon, label, sub }) => (
+            <div key={id}>
+              <div className={styles.settingItem} onClick={() => setOpenPanel(openPanel === id ? null : id)} style={{ cursor: "pointer" }}>
+                <div className={styles.settingIcon}><Icon size={20} /></div>
+                <div className={styles.settingInfo}>
+                  <h4>{label}</h4>
+                  <p>{sub}</p>
+                </div>
+                {openPanel === id
+                  ? <CaretDown size={18} className={styles.chevron} />
+                  : <CaretRight size={18} className={styles.chevron} />}
               </div>
-              <CaretRight size={18} className={styles.chevron} />
+              {openPanel === id && <div className={styles.panel}>{renderPanel(id)}</div>}
             </div>
           ))}
 
-          {/* Sign Out */}
-          <div className={styles.settingItem} onClick={handleSignOut} style={{ cursor: "pointer" }}>
-            <div className={`${styles.settingIcon} ${styles.dangerIcon}`}>
-              <SignOut size={20} />
+          {isGuest ? (
+            <div className={styles.settingItem} onClick={() => signOut()} style={{ cursor: "pointer" }}>
+              <div className={`${styles.settingIcon} ${styles.installIcon}`}>
+                <SignIn size={20} color="#a855f7" />
+              </div>
+              <div className={styles.settingInfo}>
+                <h4 style={{ color: "#a855f7" }}>Sign in or create account</h4>
+                <p>Your songs here will move into your account</p>
+              </div>
+              <CaretRight size={18} className={styles.chevron} />
             </div>
-            <div className={styles.settingInfo}>
-              <h4 style={{ color: "#f43f5e" }}>Sign Out</h4>
-              <p>Log out of AuraSynq</p>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className={styles.settingItem} onClick={() => signOut()} style={{ cursor: "pointer" }}>
+                <div className={styles.settingIcon}><UserSwitch size={20} /></div>
+                <div className={styles.settingInfo}>
+                  <h4>Switch account</h4>
+                  <p>Sign in with a different Google or email account</p>
+                </div>
+                <CaretRight size={18} className={styles.chevron} />
+              </div>
+
+              {/* Sign Out */}
+              <div className={styles.settingItem} onClick={handleSignOut} style={{ cursor: "pointer" }}>
+                <div className={`${styles.settingIcon} ${styles.dangerIcon}`}>
+                  <SignOut size={20} />
+                </div>
+                <div className={styles.settingInfo}>
+                  <h4 style={{ color: "#f43f5e" }}>Sign Out</h4>
+                  <p>Log out of AuraSynq</p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 

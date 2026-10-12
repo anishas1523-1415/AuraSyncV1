@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
+import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence } from "firebase/auth";
+import { isMobileApp } from "@/lib/api";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,13 +14,36 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase only if the config is valid and it hasn't been initialized yet.
-// Off in the mobile app: its local profile has no real user id to sync under.
-const enabled = !!firebaseConfig.apiKey && process.env.NEXT_PUBLIC_APP_TARGET !== "mobile";
-const app = getApps().length > 0 ? getApp() : (
-  enabled ? initializeApp(firebaseConfig) : null
-);
+const enabled = !!firebaseConfig.apiKey;
+const isFirstInit = enabled && getApps().length === 0;
+const app = enabled ? (isFirstInit ? initializeApp(firebaseConfig) : getApp()) : null;
+const inBrowser = typeof window !== "undefined";
 
-export const db = app ? getFirestore(app) : null;
+// Accounts (Firebase Authentication). In the Android app the sign-in session is kept in
+// IndexedDB and no popup/redirect helper is loaded (those need browser windows the app's WebView
+// doesn't have); Google sign-in there goes through the native account picker instead.
+const createAuth = () => {
+  if (!app || !inBrowser) return null;
+  if (!isMobileApp) return getAuth(app);
+  try {
+    return initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
+  } catch (e) {
+    return getAuth(app); // already initialised (e.g. after a hot reload)
+  }
+};
+
+// Library sync (Cloud Firestore). Long polling is picked automatically where streaming is blocked.
+const createFirestore = () => {
+  if (!app) return null;
+  try {
+    return initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch (e) {
+    return getFirestore(app);
+  }
+};
+
+export const firebaseApp = app;
+export const auth = createAuth();
+export const db = createFirestore();
 export const rtdb = app ? getDatabase(app) : null;
 export const isFirebaseActive = !!app;

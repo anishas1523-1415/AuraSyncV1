@@ -2,7 +2,8 @@ import "./globals.css";
 import { Inter } from "next/font/google";
 import AppShell from "@/components/AppShell";
 import { AudioProvider } from "@/contexts/AudioContext";
-import { ClerkProvider } from "@/lib/clerk";
+import { AuthProvider } from "@/lib/auth";
+import AuthGate from "@/components/AuthGate";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Suspense } from "react";
 
@@ -33,20 +34,22 @@ export default function RootLayout({ children }) {
         <script dangerouslySetInnerHTML={{ __html: "window.Capacitor = window.Capacitor || {}; if (typeof window.Capacitor.triggerEvent !== 'function') { window.Capacitor.triggerEvent = function () { return false; }; }" }} />
       </head>
       <body className={inter.className}>
-        <ClerkProvider>
+        <AuthProvider>
           <ErrorBoundary>
             <AudioProvider>
-              <div className="app-container">
-                <main className="main-content" style={{ paddingBottom: "0" }}>
-                  {children}
-                </main>
-                <Suspense fallback={null}>
-                  <AppShell />
-                </Suspense>
-              </div>
+              <AuthGate>
+                <div className="app-container">
+                  <main className="main-content" style={{ paddingBottom: "0" }}>
+                    {children}
+                  </main>
+                  <Suspense fallback={null}>
+                    <AppShell />
+                  </Suspense>
+                </div>
+              </AuthGate>
             </AudioProvider>
           </ErrorBoundary>
-        </ClerkProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -2,7 +2,7 @@
 import styles from "./page.module.css";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
-import { useUser } from "@/lib/clerk";
+import { useUser } from "@/lib/auth";
 import { Users, Microphone, MusicNote, Heartbeat, Chat, ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
 import { syncEngine } from "@/lib/syncEngine";

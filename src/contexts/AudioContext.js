@@ -1,8 +1,9 @@
 "use client";
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from "react";
-import { useUser } from "@/lib/clerk";
+import { useUser } from "@/lib/auth";
 import {
-  syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud, syncProfileToCloud, loadLibraryFromCloud
+  syncHistoryToCloud, syncLikedToCloud, syncPlaylistsToCloud, syncProfileToCloud, syncStatsToCloud,
+  loadLibraryFromCloud, deleteCloudLibrary
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
@@ -45,6 +46,16 @@ const AUTO_CACHE_KEY = "aurasynq_auto_cached_ids";
 const STATS_KEY = "aurasynq_listen_stats";
 const SYNC_META_KEY = "aurasynq_sync_meta";
 const AUDIO_CACHE = "aurasynq_offline_audio";
+const SETTINGS_KEY = "aurasynq_settings";
+
+// Device preferences from Profile → Settings
+const DEFAULT_SETTINGS = {
+  haptics: true,       // vibration on taps
+  radioAlerts: true,   // "Aura Radio queued…" pop-ups
+  autoplay: true,      // keep playing similar songs when the queue ends
+  dataSaver: false,    // phone: no pre-downloading the next song or keeping songs offline
+  pauseHistory: false, // don't record listening history
+};
 
 const HISTORY_LIMIT = 50;
 const AUTO_CACHE_LIMIT = 25;          // recently played songs kept for offline replay
@@ -248,6 +259,10 @@ export function AudioProvider({ children }) {
   const [contextPlaylist, setContextPlaylist] = useState(null);
   const [sharedTrackInfo, setSharedTrackInfo] = useState(null);
   const [cloudUserId, setCloudUserId] = useState(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const settingsRef = useRef(DEFAULT_SETTINGS);
 
   const audioRef = useRef(null);
 
@@ -272,6 +287,7 @@ export function AudioProvider({ children }) {
   const warmedIdsRef = useRef(new Set());
   const radioPendingRef = useRef(null);
   const lastPushedRef = useRef({});
+  const currentUserIdRef = useRef(null);
 
   const listenStatsRef = useRef(DEFAULT_STATS);
   const pendingListenRef = useRef(0);
@@ -309,6 +325,9 @@ export function AudioProvider({ children }) {
     const stats = { ...DEFAULT_STATS, ...readStored(STATS_KEY, DEFAULT_STATS) };
     listenStatsRef.current = stats;
     setListenStats(stats);
+    const savedSettings = { ...DEFAULT_SETTINGS, ...readStored(SETTINGS_KEY, {}) };
+    settingsRef.current = savedSettings;
+    setSettings(savedSettings);
     cachedIdsRef.current = new Set([
       ...readStored(DOWNLOADS_KEY).map(t => extractId(t)),
       ...readStored(AUTO_CACHE_KEY)
@@ -329,46 +348,119 @@ export function AudioProvider({ children }) {
     writeStored(SYNC_META_KEY, meta);
   };
 
-  // Restore from the cloud BEFORE pushing anything, so a fresh device never wipes the saved library
+  // Restore from the cloud BEFORE pushing anything, so a fresh device never wipes the saved library.
+  // Resolves to true when the cloud was reached.
+  const restoreFromCloud = async (account) => {
+    const userId = account.id;
+    syncProfileToCloud(account);
+    const cloud = await loadLibraryFromCloud(userId);
+    if (!cloud || currentUserIdRef.current !== userId) return false;
+    const meta = readStored(SYNC_META_KEY, {});
+
+    const liked = resolveCollection(likedTracksRef.current, meta.liked || 0, cloud.likedTracks, cloud.likedUpdatedAt);
+    const playlists = resolveCollection(customPlaylistsRef.current, meta.playlists || 0, cloud.customPlaylists, cloud.playlistsUpdatedAt);
+    const history = mergeById(playHistoryRef.current, cloud.playHistory).slice(0, HISTORY_LIMIT);
+
+    meta.liked = Math.max(meta.liked || 0, cloud.likedUpdatedAt);
+    meta.playlists = Math.max(meta.playlists || 0, cloud.playlistsUpdatedAt);
+    writeStored(SYNC_META_KEY, meta);
+
+    // Listening totals only grow, so the larger count from either side is the right one
+    if (cloud.listenStats) {
+      const local = listenStatsRef.current;
+      saveListenStats({
+        totalSeconds: Math.max(local.totalSeconds || 0, Number(cloud.listenStats.totalSeconds) || 0),
+        trackPlays: Math.max(local.trackPlays || 0, Number(cloud.listenStats.trackPlays) || 0),
+      });
+    }
+
+    // What the cloud already holds; identical values are not pushed back
+    lastPushedRef.current = {
+      liked: JSON.stringify(cloud.likedTracks),
+      playlists: JSON.stringify(cloud.customPlaylists),
+      history: JSON.stringify(cloud.playHistory),
+      stats: JSON.stringify(cloud.listenStats),
+    };
+    setLikedTracks(liked);
+    setCustomPlaylists(playlists);
+    setPlayHistory(history);
+    setCloudUserId(userId);
+    setLastSyncedAt(Date.now());
+    return true;
+  };
+
   useEffect(() => {
+    currentUserIdRef.current = user?.id || null;
     if (!libraryReady || !user?.id) return;
-    let cancelled = false;
-    const userId = user.id;
-    syncProfileToCloud(user);
-
-    loadLibraryFromCloud(userId).then((cloud) => {
-      if (cancelled || !cloud) return;
-      const meta = readStored(SYNC_META_KEY, {});
-
-      const liked = resolveCollection(likedTracksRef.current, meta.liked || 0, cloud.likedTracks, cloud.likedUpdatedAt);
-      const playlists = resolveCollection(customPlaylistsRef.current, meta.playlists || 0, cloud.customPlaylists, cloud.playlistsUpdatedAt);
-      const history = mergeById(playHistoryRef.current, cloud.playHistory).slice(0, HISTORY_LIMIT);
-
-      meta.liked = Math.max(meta.liked || 0, cloud.likedUpdatedAt);
-      meta.playlists = Math.max(meta.playlists || 0, cloud.playlistsUpdatedAt);
-      writeStored(SYNC_META_KEY, meta);
-
-      // What the cloud already holds; identical values are not pushed back
-      lastPushedRef.current = {
-        liked: JSON.stringify(cloud.likedTracks),
-        playlists: JSON.stringify(cloud.customPlaylists),
-        history: JSON.stringify(cloud.playHistory)
-      };
-      setLikedTracks(liked);
-      setCustomPlaylists(playlists);
-      setPlayHistory(history);
-      setCloudUserId(userId);
-    });
-
-    return () => { cancelled = true; };
+    restoreFromCloud(user);
   }, [libraryReady, user?.id]);
+
+  // Signing out or switching accounts: stop the music and clear this person's library from the
+  // device, so it can't leak into the next account. (A guest who signs in keeps theirs: it merges.)
+  const previousUserIdRef = useRef(undefined);
+  useEffect(() => {
+    if (!libraryReady) return;
+    const id = user?.id || null;
+    const previous = previousUserIdRef.current;
+    previousUserIdRef.current = id;
+    if (previous && previous !== id) {
+      stopAudio();
+      clearLocalLibrary();
+    }
+  }, [libraryReady, user?.id]);
+
+  const clearLocalLibrary = () => {
+    [HISTORY_KEY, LIKED_KEY, PLAYLISTS_KEY, STATS_KEY, SYNC_META_KEY].forEach((key) => {
+      try { localStorage.removeItem(key); } catch (e) {}
+    });
+    lastPushedRef.current = {};
+    setCloudUserId(null);
+    setLastSyncedAt(0);
+    setPlayHistory([]);
+    setLikedTracks([]);
+    setCustomPlaylists([]);
+    commitQueue([]);
+    originalQueueRef.current = [];
+    saveListenStats(DEFAULT_STATS);
+  };
+
+  // Profile → "Sync now": pull the newest library from the cloud, then push anything newer here
+  const syncNow = async () => {
+    if (!user?.id) return false;
+    setIsSyncing(true);
+    try {
+      const ok = await restoreFromCloud(user);
+      if (!ok) return false;
+      const userId = user.id;
+      const results = await Promise.all([
+        syncLikedToCloud(likedTracksRef.current, userId, readStored(SYNC_META_KEY, {}).liked || Date.now()),
+        syncPlaylistsToCloud(customPlaylistsRef.current, userId, readStored(SYNC_META_KEY, {}).playlists || Date.now()),
+        syncHistoryToCloud(playHistoryRef.current, userId),
+        syncStatsToCloud(listenStatsRef.current, userId),
+      ]);
+      if (results.every(Boolean)) setLastSyncedAt(Date.now());
+      return results.every(Boolean);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Account deletion: wipe the cloud copy and this device's library
+  const deleteCloudData = async () => {
+    const ok = await deleteCloudLibrary(user?.id);
+    if (ok) clearLocalLibrary();
+    return ok;
+  };
 
   const pushIfChanged = (key, value, push) => {
     if (!cloudUserId || cloudUserId !== user?.id) return;
     const json = JSON.stringify(value);
     if (lastPushedRef.current[key] === json) return;
     lastPushedRef.current[key] = json;
-    push();
+    Promise.resolve(push()).then((ok) => {
+      if (ok) setLastSyncedAt(Date.now());
+      else delete lastPushedRef.current[key]; // try again on the next change or "Sync now"
+    });
   };
 
   useEffect(() => {
@@ -384,6 +476,36 @@ export function AudioProvider({ children }) {
     pushIfChanged("playlists", customPlaylists, () =>
       syncPlaylistsToCloud(customPlaylists, cloudUserId, readStored(SYNC_META_KEY, {}).playlists || Date.now()));
   }, [customPlaylists, cloudUserId]);
+
+  // Listening time changes constantly; send it at most once a minute
+  useEffect(() => {
+    if (!cloudUserId) return;
+    const timer = setTimeout(() => {
+      pushIfChanged("stats", listenStats, () => syncStatsToCloud(listenStatsRef.current, cloudUserId));
+    }, 60000);
+    return () => clearTimeout(timer);
+  }, [listenStats, cloudUserId]);
+
+  // ─── Settings ────────────────────────────────────────────
+
+  const updateSettings = (patch) => {
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+    writeStored(SETTINGS_KEY, next);
+  };
+
+  // Haptics off: every tap's vibration becomes a no-op (the calls are spread across the UI)
+  useEffect(() => {
+    if (settings.haptics || typeof navigator === "undefined" || !navigator.vibrate) return;
+    navigator.vibrate = () => false;
+    return () => { delete navigator.vibrate; };
+  }, [settings.haptics]);
+
+  const clearHistory = () => {
+    setPlayHistory([]);
+    toast("Listening history cleared");
+  };
 
   // ─── Listening stats ─────────────────────────────────────
 
@@ -549,8 +671,10 @@ export function AudioProvider({ children }) {
   };
 
   const addToHistory = (track) => {
-    const light = lightTrack(track);
-    setPlayHistory(prev => [light, ...prev.filter(t => t.id !== track.id)].slice(0, HISTORY_LIMIT));
+    if (!settingsRef.current.pauseHistory) {
+      const light = lightTrack(track);
+      setPlayHistory(prev => [light, ...prev.filter(t => t.id !== track.id)].slice(0, HISTORY_LIMIT));
+    }
     const stats = listenStatsRef.current;
     saveListenStats({ ...stats, trackPlays: stats.trackPlays + 1 });
   };
@@ -781,7 +905,7 @@ export function AudioProvider({ children }) {
         if (fresh.length) {
           commitQueue([...queueRef.current, ...fresh]);
           originalQueueRef.current = [...originalQueueRef.current, ...fresh];
-          toast(`📻 Aura Radio queued ${fresh.length} songs like "${shortTitle(seed.title).slice(0, 28)}"`);
+          if (settingsRef.current.radioAlerts) toast(`📻 Aura Radio queued ${fresh.length} songs like "${shortTitle(seed.title).slice(0, 28)}"`);
         }
         return fresh;
       } catch (e) {
@@ -824,6 +948,13 @@ export function AudioProvider({ children }) {
     }
     if (currentIndex < currentQ.length - 1) {
       playTrack(currentQ[currentIndex + 1], null, shouldAutoPlay);
+      return;
+    }
+
+    // Autoplay off: the queue ends here (back to its first song, paused)
+    if (!settingsRef.current.autoplay) {
+      if (currentQ.length > 1) playTrack(currentQ[0], null, false);
+      else { seekTo(0); pause(); }
       return;
     }
 
@@ -943,8 +1074,8 @@ export function AudioProvider({ children }) {
     if (!id || !YOUTUBE_ID.test(id) || warmedIdsRef.current.has(id)) return;
     warmedIdsRef.current.add(id);
     if (isMobileApp) {
-      // Download the upcoming song on the phone so the skip is instant
-      loadOnDevice().then((ondevice) => ondevice?.prefetchTrack(id));
+      // Download the upcoming song on the phone so the skip is instant (data saver: look it up only)
+      loadOnDevice().then((ondevice) => (settingsRef.current.dataSaver ? ondevice?.preResolve([id]) : ondevice?.prefetchTrack(id)));
       return;
     }
     fetch(`${streamKey(id)}&warm=1`).catch(() => warmedIdsRef.current.delete(id));
@@ -984,6 +1115,7 @@ export function AudioProvider({ children }) {
     const trackId = extractId(track);
     if (!trackId || !YOUTUBE_ID.test(trackId) || cachedIdsRef.current.has(trackId)) return;
     if (!("caches" in window) || navigator.onLine === false || navigator.connection?.saveData) return;
+    if (settingsRef.current.dataSaver) return;
     cachedIdsRef.current.add(trackId);
     try {
       const cache = await caches.open(AUDIO_CACHE);
@@ -1353,7 +1485,9 @@ export function AudioProvider({ children }) {
       contextPlaylist, setContextPlaylist,
       downloadTrack, deleteDownloadedTrack,
       sharedTrackInfo, setSharedTrackInfo, clearSharedTrack, openSharedTrack, playSharedTrack,
-      getUserTasteProfile, listenStats, prefetchTracks
+      getUserTasteProfile, listenStats, prefetchTracks,
+      settings, updateSettings, clearHistory,
+      syncNow, isSyncing, lastSyncedAt, isCloudSynced: !!cloudUserId && cloudUserId === user?.id, deleteCloudData
     }}>
       {children}
       {/* Always mounted: the very first tap must find an element to load and play synchronously */}

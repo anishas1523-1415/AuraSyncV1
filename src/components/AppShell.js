@@ -1,7 +1,6 @@
 "use client";
-import { useAuth } from "@/lib/clerk";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
@@ -9,12 +8,10 @@ import AuraDial from "./AuraDial";
 import { useAndroidBackButton } from "@/lib/backButton";
 
 export default function AppShell() {
-  const { isSignedIn } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { currentTrack, stopAudio, sharedTrackInfo, openSharedTrack, playSharedTrack, clearSharedTrack } = useAudio();
-  const wasSignedInRef = useRef(isSignedIn);
+  const { currentTrack, sharedTrackInfo, openSharedTrack, playSharedTrack, clearSharedTrack } = useAudio();
   useAndroidBackButton();
 
   const isAuthPage =
@@ -82,15 +79,6 @@ export default function AppShell() {
       });
     }
   }, []);
-
-  // Stop music only on the transition to signed-out. stopAudio is a new function every render,
-  // so depending on it re-ran this on every render and looped while signed out.
-  useEffect(() => {
-    if (wasSignedInRef.current && isSignedIn === false) {
-      stopAudio();
-    }
-    wasSignedInRef.current = isSignedIn;
-  }, [isSignedIn]);
 
   if (isAuthPage) return null;
 

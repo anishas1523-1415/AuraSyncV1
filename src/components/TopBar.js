@@ -1,6 +1,6 @@
 "use client";
 import styles from './TopBar.module.css';
-import { UserButton, useUser, dark } from '@/lib/clerk';
+import { useUser } from '@/lib/auth';
 import { Bell, Users, Waves } from '@phosphor-icons/react';
 import Link from 'next/link';
 
@@ -9,25 +9,18 @@ export default function TopBar() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
 
-  const displayName = isLoaded && user ? user.firstName || user.fullName || "Guest" : "Guest";
+  const displayName = isLoaded && user ? user.firstName || user.fullName || "Aura" : "Aura";
 
   return (
     <header className={styles.topBar}>
       <Link href="/profile" className={styles.userInfo}>
-        <UserButton 
-          afterSignOutUrl="/"
-          appearance={{
-            baseTheme: dark,
-            elements: {
-              avatarBox: {
-                width: "42px",
-                height: "42px",
-                borderRadius: "50%",
-                border: "2px solid rgba(255,255,255,0.12)"
-              }
-            }
-          }}
-        />
+        {user?.imageUrl ? (
+          <img src={user.imageUrl} alt="" className={styles.avatarSmall} referrerPolicy="no-referrer" />
+        ) : (
+          <span className={styles.avatarSmall}>
+            {user ? (displayName.charAt(0) || "A").toUpperCase() : <img src="/icon-192x192.png" alt="" />}
+          </span>
+        )}
         <div>
           <p className={styles.greeting}>{greeting},</p>
           <h1 className={styles.name}>{displayName}</h1>

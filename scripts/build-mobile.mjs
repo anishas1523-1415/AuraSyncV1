@@ -4,8 +4,9 @@
 //   npm run build:mobile                       # uses the production site for API calls
 //   AURASYNQ_SITE_URL=https://... npm run build:mobile
 //
-// API routes, the auth middleware and the Clerk sign-in pages can't be statically exported
-// (they keep running on Vercel), so they are moved aside for the build and always restored.
+// API routes, the middleware and the web sign-in pages (catch-all routes) can't be statically exported
+// (they keep running on Vercel; the app shows its own sign-in screen), so they are moved aside
+// for the build and always restored.
 
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";

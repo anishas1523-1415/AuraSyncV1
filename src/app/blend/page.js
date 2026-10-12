@@ -1,7 +1,7 @@
 "use client";
 import styles from "./page.module.css";
 import { useState, useEffect } from "react";
-import { useUser } from "@/lib/clerk";
+import { useUser } from "@/lib/auth";
 import { useAudio } from "@/contexts/AudioContext";
 import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } from "@phosphor-icons/react";
 import Link from "next/link";

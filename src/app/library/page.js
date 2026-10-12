@@ -6,7 +6,7 @@ import {
   PencilSimple, Users, UserPlus, Sparkle, PlusCircle, Check, DownloadSimple
 } from "@phosphor-icons/react";
 import styles from "./page.module.css";
-import { useUser } from "@/lib/clerk";
+import { useUser } from "@/lib/auth";
 import { toast, shareOrCopy } from "@/lib/toast";
 import { siteUrl } from "@/lib/api";
 import { useCloseOnBack } from "@/lib/backButton";

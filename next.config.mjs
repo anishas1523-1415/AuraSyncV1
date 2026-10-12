@@ -1,8 +1,4 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import withPWAInit from "@ducanh2912/next-pwa";
-
-const projectDir = path.dirname(fileURLToPath(import.meta.url));
 
 // `npm run build:mobile` sets this to bundle the UI into the Android app (static export).
 // The API routes keep running on Vercel and the app calls them over HTTPS.
@@ -60,16 +56,6 @@ const nextConfig = isMobileBuild
       // It also keeps a running `next dev` (.next) intact.
       distDir: "out",
       images: { unoptimized: true },
-      webpack(config) {
-        // The app uses its local profile; keep Clerk (and its server actions) out of the bundle
-        const clerkStub = path.join(projectDir, "src/lib/clerkMobileStub.js");
-        config.resolve.alias = {
-          ...config.resolve.alias,
-          "@clerk/nextjs$": clerkStub,
-          "@clerk/themes$": clerkStub,
-        };
-        return config;
-      },
     }
   : {
       reactStrictMode: true,
