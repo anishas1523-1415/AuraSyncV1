@@ -1,9 +1,27 @@
 import { NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 import { Ratelimit } from '@upstash/ratelimit';
+import { Innertube } from 'youtubei.js';
 import { supabase, isSupabaseActive } from '@/lib/supabase';
+import { searchMusicSongs, musicRadio } from '@/lib/musicTracks';
 
 const ytSearch = require('youtube-search-api');
+
+// YouTube Music: song search returns actual songs (official audio), not stage shows, covers or
+// reaction videos; its radio ("up next") gives songs in the same mood for autoplay and For You.
+const MUSIC_TIMEOUT_MS = 5000;
+let musicClientPromise = null;
+const getMusicClient = () => {
+  if (!musicClientPromise) {
+    musicClientPromise = Innertube.create({ retrieve_player: false, generate_session_locally: true })
+      .catch((err) => { musicClientPromise = null; throw err; });
+  }
+  return musicClientPromise;
+};
+const withMusicTimeout = (promise) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error('YouTube Music timed out')), MUSIC_TIMEOUT_MS)),
+]);
 
 // Search-as-you-type, Discover, categories and Blend all share this budget; cached queries are free
 const RATE_LIMIT_PER_MINUTE = 30;
@@ -184,18 +202,50 @@ async function selectSongs(query, allResults) {
   return songs;
 }
 
+// Older sources (plain YouTube search) for when YouTube Music is unreachable or finds too little
+async function searchVideos(query) {
+  const results = await selectSongs(query, await searchAllSources(query));
+  return results.slice(0, 15).map(item => ({
+    id: item.videoId,
+    title: item.title,
+    artist: item.author || 'Unknown Artist',
+    cover: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+    url: `https://www.youtube.com/watch?v=${item.videoId}`,
+    duration: item.durationSeconds || 0,
+    mood: "energetic",
+    hue: Math.floor(Math.random() * 360)
+  }));
+}
+
+async function findTracks(query, relatedTo) {
+  if (relatedTo) {
+    return withMusicTimeout(getMusicClient().then(yt => musicRadio(yt, relatedTo))).then(t => t.slice(0, 30));
+  }
+  try {
+    const songs = await withMusicTimeout(getMusicClient().then(yt => searchMusicSongs(yt, query)));
+    if (songs.length >= MIN_SONG_RESULTS) return songs.slice(0, 30);
+  } catch (err) {
+    console.warn('YouTube Music search failed, using YouTube search:', err.message);
+  }
+  return searchVideos(query);
+}
+
 export async function GET(request) {
   const ip = getClientIp(request);
   const now = Date.now();
 
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
+  const relatedTo = searchParams.get('related');
 
-  if (!query) {
-    return NextResponse.json({ error: 'Query parameter "q" is required' }, { status: 400 });
+  if (relatedTo && !/^[A-Za-z0-9_-]{11}$/.test(relatedTo)) {
+    return NextResponse.json({ error: 'Invalid "related" video id' }, { status: 400 });
+  }
+  if (!query && !relatedTo) {
+    return NextResponse.json({ error: 'Query parameter "q" or "related" is required' }, { status: 400 });
   }
 
-  const queryClean = query.toLowerCase().trim().slice(0, 200);
+  const queryClean = relatedTo ? `related:${relatedTo}` : query.toLowerCase().trim().slice(0, 200);
   const cacheKey = `search:${queryClean}`;
 
   // 1. Cache hits are served before rate limiting; they cost nothing upstream
@@ -232,22 +282,11 @@ export async function GET(request) {
   }
 
   try {
-    const results = await selectSongs(query, await searchAllSources(query));
+    const candidateTracks = await findTracks(query, relatedTo);
 
-    if (!results || results.length === 0) {
+    if (candidateTracks.length === 0) {
       return NextResponse.json({ tracks: [] });
     }
-
-    const candidateTracks = results.slice(0, 15).map(item => ({
-      id: item.videoId,
-      title: item.title,
-      artist: item.author || 'Unknown Artist',
-      cover: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-      url: `https://www.youtube.com/watch?v=${item.videoId}`,
-      duration: item.durationSeconds || 0,
-      mood: "energetic",
-      hue: Math.floor(Math.random() * 360)
-    }));
 
     // Cache metadata into Supabase song_cache for each track found
     if (isSupabaseActive) {
