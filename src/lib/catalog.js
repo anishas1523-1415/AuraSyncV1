@@ -4,11 +4,35 @@
 // on the website, and as the app's fallback, through /api/search.
 import { apiUrl, isMobileApp } from "@/lib/api";
 
-const CACHE_MS = 10 * 60 * 1000;
+const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
+const STORE_KEY = "aurasynq_catalog_cache";
+const MAX_STORED = 80;
 const RECENT_HISTORY = 30; // songs played lately sink to the bottom of fresh mixes
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 
-const cache = new Map(); // key -> { at, tracks }
+// key -> { at, tracks }. Kept on the device too, so lists open instantly on later visits
+const cache = new Map();
+let restored = false;
+const restoreCache = () => {
+  if (restored || typeof window === "undefined") return;
+  restored = true;
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+    for (const [key, entry] of saved) {
+      if (Date.now() - entry.at < CACHE_MS) cache.set(key, entry);
+    }
+  } catch (e) {}
+};
+let persistTimer = null;
+const persistCache = () => {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    try {
+      const entries = [...cache.entries()].sort((a, b) => b[1].at - a[1].at).slice(0, MAX_STORED);
+      localStorage.setItem(STORE_KEY, JSON.stringify(entries));
+    } catch (e) {}
+  }, 500);
+};
 const lastSeeds = new Map(); // mix key -> seeds used last time
 
 let musicPromise = null;
@@ -26,11 +50,27 @@ async function fromServer(params) {
 }
 
 async function cached(key, load, fresh) {
+  restoreCache();
   const hit = cache.get(key);
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.tracks;
-  const tracks = await load();
-  if (tracks.length) cache.set(key, { at: Date.now(), tracks });
-  return tracks;
+  try {
+    const tracks = await load();
+    if (tracks.length) {
+      cache.set(key, { at: Date.now(), tracks });
+      persistCache();
+    }
+    return tracks;
+  } catch (err) {
+    // Offline or a flaky connection: an older copy beats an empty screen
+    if (hit) return hit.tracks;
+    throw err;
+  }
+}
+
+// Open the phone's YouTube Music connection early, so the first list loads sooner
+export function warmCatalog() {
+  restoreCache();
+  loadMusic().then((music) => music?.warmUp?.()).catch(() => {});
 }
 
 // Phone first; the server if the phone's lookup fails or finds nothing

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Listen on AuraSynq</title>
+  <meta name="description" content="Someone shared a song with you on AuraSynq.">
+  <meta property="og:title" content="Listen on AuraSynq">
+  <meta property="og:description" content="Someone shared a song with you. Tap to listen on AuraSynq.">
+  <meta property="og:image" content="https://aurasynq.web.app/icon-192x192.png">
+  <meta property="og:site_name" content="AuraSynq">
+  <meta name="theme-color" content="#090d18">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/share.css">
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"><span class="a"></span><span class="b"></span><span class="c"></span></div>
+  <main class="card">
+    <div class="cover-wrap"><img id="cover" class="cover" alt=""></div>
+    <p class="eyebrow">Shared with you on AuraSynq</p>
+    <h1 id="title">A song for you</h1>
+    <p id="artist" class="artist"></p>
+    <a id="open" class="primary" href="#">Open in AuraSynq</a>
+    <p class="hint" id="hint">Don't have the app? AuraSynq for Android is coming to Google Play.</p>
+    <div class="brand"><img src="/logo-emblem.png" alt="" width="40" height="32"><span>AuraSynq</span></div>
+  </main>
+  <script>
+    (function () {
+      var match = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{11})/);
+      var id = match ? match[1] : null;
+      var params = new URLSearchParams(location.search);
+      var title = params.get("t");
+      var artist = params.get("a");
+      if (title) { document.getElementById("title").textContent = title; document.title = title + " · AuraSynq"; }
+      if (artist) document.getElementById("artist").textContent = artist;
+      var cover = document.getElementById("cover");
+      if (id) cover.src = "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg";
+      else cover.src = "/logo-emblem.png";
+
+      // Opens the app straight on the song; Chrome falls back to this page if it isn't installed
+      var deep = "s/" + (id || "") + location.search;
+      var open = document.getElementById("open");
+      if (/Android/i.test(navigator.userAgent)) {
+        open.href = "intent://" + deep + "#Intent;scheme=aurasynq;package=com.aurasynq.app;S.browser_fallback_url=" +
+          encodeURIComponent(location.href) + ";end";
+      } else {
+        open.href = "aurasynq://" + deep;
+        document.getElementById("hint").textContent = "AuraSynq is an Android app. Open this link on your Android phone to listen.";
+      }
+    })();
+  </script>
+</body>
+</html>

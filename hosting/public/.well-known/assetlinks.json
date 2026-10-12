@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.aurasynq.app",
+      "sha256_cert_fingerprints": [
+        "4D:07:F4:C7:1C:DA:94:B2:7C:AE:23:9E:A2:3B:20:FC:62:17:A8:94:6F:7C:77:2B:32:08:1B:89:08:4B:E1:8F"
+      ]
+    }
+  }
+]

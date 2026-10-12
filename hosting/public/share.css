@@ -1,0 +1,90 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { min-height: 100%; }
+
+body {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #fff;
+  background-color: #090d18;
+  background-image:
+    radial-gradient(circle at top, rgba(104, 116, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 20% 20%, rgba(138, 43, 226, 0.18), transparent 28%),
+    radial-gradient(circle at 80% 0%, rgba(255, 105, 180, 0.10), transparent 24%),
+    linear-gradient(180deg, #0b1020 0%, #0d1424 45%, #090d18 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.aurora { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.aurora span { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.45; animation: drift 22s ease-in-out infinite alternate; }
+.aurora .a { width: 260px; height: 260px; background: #8a2be2; top: 8%; left: -60px; }
+.aurora .b { width: 220px; height: 220px; background: #ec4899; bottom: 10%; right: -50px; animation-duration: 26s; }
+.aurora .c { width: 180px; height: 180px; background: #11998e; top: 45%; left: 40%; opacity: 0.3; animation-duration: 30s; }
+
+@keyframes drift {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(40px, -30px) scale(1.1); }
+  100% { transform: translate(-30px, 40px) scale(0.95); }
+}
+
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1.25rem;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.cover-wrap {
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  padding: 4px;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  box-shadow: 0 0 40px rgba(168, 85, 247, 0.45);
+  margin-bottom: 1.25rem;
+}
+
+.cover { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; background: #1a1a2e; }
+
+.eyebrow { font-size: 0.72rem; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); }
+h1 { font-size: 1.6rem; font-weight: 800; margin-top: 0.4rem; line-height: 1.2; }
+.artist { color: rgba(255, 255, 255, 0.7); margin-top: 0.35rem; }
+
+.primary {
+  display: block;
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.35);
+}
+
+.hint { margin-top: 0.9rem; font-size: 0.8rem; color: rgba(255, 255, 255, 0.5); }
+
+.brand { display: flex; align-items: center; gap: 0.4rem; margin-top: 1.5rem; }
+.brand span {
+  font-weight: 800;
+  font-size: 1.1rem;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) { .aurora span { animation: none; } }

@@ -7,8 +7,8 @@ import {
 } from "@phosphor-icons/react";
 import styles from "./page.module.css";
 import { useUser } from "@/lib/auth";
-import { toast, shareOrCopy } from "@/lib/toast";
-import { siteUrl } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { shareInvite } from "@/lib/share";
 import { useCloseOnBack } from "@/lib/backButton";
 
 // Recommended songs to add to custom playlists
@@ -116,11 +116,10 @@ export default function Library() {
 
   const handleInviteFriend = () => {
     // AppShell handles ?playlist= on any route; /invite-blend never existed (404)
-    const inviteUrl = siteUrl(`/library?playlist=${encodeURIComponent(selectedPlaylistId)}`);
-    shareOrCopy({
+    shareInvite({
       title: "Collaborate on AuraSynq",
       text: `Hey, join my collaborative playlist "${activePlaylist.name}" on AuraSynq!`,
-      url: inviteUrl
+      path: `/library?playlist=${encodeURIComponent(selectedPlaylistId)}`
     }, "Collaborative invite link copied to clipboard!");
   };
 

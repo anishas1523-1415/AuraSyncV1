@@ -6,6 +6,7 @@ import { Play, Pause, ArrowLeft, MusicNotes } from "@phosphor-icons/react";
 import Link from "next/link";
 import SyncButton from "@/components/SyncButton";
 import { toast } from "@/lib/toast";
+import { useReconnect } from "@/lib/network";
 import { mixSongs } from "@/lib/catalog";
 import { TRENDS_SEEDS } from "@/app/category/[slug]/categories";
 
@@ -145,6 +146,9 @@ export default function Trends() {
       setLoading(false);
     }
   };
+
+  // Came back online with nothing on screen: load now
+  useReconnect(() => { if (!tracks.length) loadTrends(); });
 
   useEffect(() => {
     loadTrends();

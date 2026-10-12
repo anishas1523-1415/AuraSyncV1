@@ -27,6 +27,11 @@ const config: CapacitorConfig = {
   // audio chunk as base64 text, which noticeably slowed down streaming
   loggingBehavior: 'none',
   plugins: {
+    // The app is always dark, so the clock and status icons are always light (the default follows
+    // the phone's light/dark mode and drew black icons on the black player)
+    SystemBars: {
+      style: 'DARK',
+    },
     // Google sign-in uses the phone's native account picker; the resulting Google token then signs
     // in to Firebase through the JavaScript SDK (skipNativeAuth), shared with the website code
     FirebaseAuthentication: {

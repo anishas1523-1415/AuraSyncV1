@@ -32,3 +32,7 @@ export async function searchSongs(query) {
 export async function relatedSongs(videoId) {
   return musicRadio(await getClient(), videoId);
 }
+
+export function warmUp() {
+  getClient().catch(() => {});
+}

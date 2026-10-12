@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 const INITIAL_BUBBLES = [
   { id: "chill",       name: "CHILL",    color: "#11998e", path: "/category/chill",    size: 130 },
-  { id: "trending",    name: "TRENDING", color: "#ff0844", path: "/trends",             size: 145 },
+  { id: "trending",    name: "TRENDING", color: "#ff0844", path: "/trending",           size: 145 },
   { id: "foryou",      name: "FOR YOU",  color: "#ec4899", path: "/category/foryou",     size: 155 },
   { id: "focus",       name: "FOCUS",    color: "#8e54e9", path: "/category/focus",    size: 120 },
   { id: "workout",     name: "WORKOUT",  color: "#ff4500", path: "/category/workout",  size: 135 },

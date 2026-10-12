@@ -7,6 +7,7 @@ import Link from "next/link";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 import SyncButton from "@/components/SyncButton";
 import { toast } from "@/lib/toast";
+import { useReconnect } from "@/lib/network";
 import { mixSongs, forYouSongs } from "@/lib/catalog";
 import { CATEGORY_MAP } from "./categories";
 
@@ -45,6 +46,9 @@ export default function CategoryClient({ slug }) {
       if (requestId === requestRef.current) setLoading(false);
     }
   };
+
+  // Came back online with nothing on screen: load now
+  useReconnect(() => { if (!tracks.length) loadSongs(); });
 
   useEffect(() => {
     setLoading(true);

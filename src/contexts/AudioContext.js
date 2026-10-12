@@ -7,7 +7,7 @@ import {
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
-import { relatedSongs } from "@/lib/catalog";
+import { relatedSongs, warmCatalog } from "@/lib/catalog";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
 // On the web it wraps navigator.mediaSession, so one adapter covers both.
@@ -288,6 +288,7 @@ export function AudioProvider({ children }) {
   const radioPendingRef = useRef(null);
   const lastPushedRef = useRef({});
   const currentUserIdRef = useRef(null);
+  const waitingForNetworkRef = useRef(null); // song that failed because the phone went offline
 
   const listenStatsRef = useRef(DEFAULT_STATS);
   const pendingListenRef = useRef(0);
@@ -333,8 +334,9 @@ export function AudioProvider({ children }) {
       ...readStored(AUTO_CACHE_KEY)
     ]);
     setLibraryReady(true);
-    // Start the phone's YouTube session (BotGuard) early so the first tap plays sooner
+    // Start the phone's YouTube session (BotGuard) and music lookups early so the first tap is faster
     loadOnDevice().then((ondevice) => ondevice?.warmUp());
+    warmCatalog();
   }, []);
 
   useEffect(() => { if (libraryReady) writeStored(HISTORY_KEY, playHistory); }, [playHistory, libraryReady]);
@@ -394,6 +396,11 @@ export function AudioProvider({ children }) {
     if (!libraryReady || !user?.id) return;
     restoreFromCloud(user);
   }, [libraryReady, user?.id]);
+
+  // Name or photo edited: keep the cloud profile in step
+  useEffect(() => {
+    if (cloudUserId && cloudUserId === user?.id) syncProfileToCloud(user);
+  }, [user?.fullName, user?.imageUrl, cloudUserId]);
 
   // Signing out or switching accounts: stop the music and clear this person's library from the
   // device, so it can't leak into the next account. (A guest who signs in keeps theirs: it merges.)
@@ -485,6 +492,20 @@ export function AudioProvider({ children }) {
     }, 60000);
     return () => clearTimeout(timer);
   }, [listenStats, cloudUserId]);
+
+  // Back online: retry the song that stopped because the connection dropped
+  useEffect(() => {
+    const retry = () => {
+      const track = waitingForNetworkRef.current;
+      waitingForNetworkRef.current = null;
+      if (!track || currentTrackRef.current?.id !== track.id) return;
+      consecutiveErrorsRef.current = 0;
+      currentTrackRef.current = null; // force a fresh load instead of "replay from 0:00"
+      actionsRef.current.playTrack(track, null, true); // latest version, not this first render's
+    };
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, []);
 
   // ─── Settings ────────────────────────────────────────────
 
@@ -1027,7 +1048,7 @@ export function AudioProvider({ children }) {
 
   // Latest handlers for lock screen / notification callbacks registered once
   const actionsRef = useRef({});
-  actionsRef.current = { resume, pause, playNext, playPrevious, seekTo };
+  actionsRef.current = { resume, pause, playNext, playPrevious, seekTo, playTrack };
 
   useEffect(() => {
     const handlers = {
@@ -1459,6 +1480,13 @@ export function AudioProvider({ children }) {
     if (!track) return;
     setIsBuffering(false);
     setIsPlaying(false);
+
+    // No connection: don't burn through the queue; play this song once the phone is back online
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      waitingForNetworkRef.current = track;
+      toast("You're offline — this song will play when you're back online", { variant: "error" });
+      return;
+    }
 
     // Prevent infinite skip loops during global YouTube outages
     consecutiveErrorsRef.current += 1;

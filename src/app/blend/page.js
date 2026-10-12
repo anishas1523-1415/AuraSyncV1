@@ -6,8 +6,8 @@ import { useAudio } from "@/contexts/AudioContext";
 import { Play, Pause, Shuffle, MusicNote, Sparkle, ArrowLeft, Users, UserPlus } from "@phosphor-icons/react";
 import Link from "next/link";
 import { supabase, isSupabaseActive } from "@/lib/supabase";
-import { shareOrCopy } from "@/lib/toast";
-import { siteUrl } from "@/lib/api";
+
+import { shareInvite } from "@/lib/share";
 import { searchSongs, shuffle } from "@/lib/catalog";
 import { useCloseOnBack } from "@/lib/backButton";
 
@@ -149,11 +149,10 @@ export default function Blend() {
       if (error) console.warn("Failed to create blend session in Supabase:", error);
     }
 
-    const inviteUrl = siteUrl(`/blend?invite=${sessionUuid}`);
-    shareOrCopy({
+    shareInvite({
       title: "Aura Blend on AuraSynq",
       text: `Vibe Check! Blend your music taste with mine on AuraSynq!`,
-      url: inviteUrl
+      path: `/blend?invite=${sessionUuid}`
     }, "Blend invite link copied to clipboard!");
   };
 

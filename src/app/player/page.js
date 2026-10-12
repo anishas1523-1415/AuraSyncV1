@@ -5,8 +5,7 @@ import styles from "./page.module.css";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share, ListPlus } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { shareOrCopy } from "@/lib/toast";
-import { siteUrl } from "@/lib/api";
+import { shareSong } from "@/lib/share";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
@@ -36,15 +35,7 @@ export default function Player() {
   const handleShareClick = async (e) => {
     e.stopPropagation();
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
-    // Title and artist ride along so the receiver sees the song instantly, without a lookup
-    const title = currentTrack.title?.split("|")[0].split("(")[0].trim() || "";
-    const shareUrl = siteUrl(`/player?track=${encodeURIComponent(currentTrack.id)}`) +
-      `&t=${encodeURIComponent(title)}&a=${encodeURIComponent(currentTrack.artist || "")}`;
-    await shareOrCopy({
-      title: currentTrack.title,
-      text: `🎵 Vibe with me to "${title}" by ${currentTrack.artist} on AuraSynq!`,
-      url: shareUrl
-    }, "Song link copied to clipboard!");
+    await shareSong(currentTrack);
   };
 
   const lastClickTime = useRef(0);

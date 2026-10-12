@@ -3,8 +3,9 @@ import styles from "./page.module.css";
 import { useAudio } from "@/contexts/AudioContext";
 import { Heart, Share, Play, Pause } from "@phosphor-icons/react";
 import { useEffect, useState, useRef } from "react";
-import { shareOrCopy, toast } from "@/lib/toast";
-import { siteUrl } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { shareSong } from "@/lib/share";
+import { useReconnect } from "@/lib/network";
 import { mixSongs, forYouSongs } from "@/lib/catalog";
 import { DISCOVER_SEEDS } from "@/app/category/[slug]/categories";
 import SyncButton from "@/components/SyncButton";
@@ -51,6 +52,9 @@ export default function Discover() {
     }
   };
 
+  // Came back online with nothing on screen: load now
+  useReconnect(() => { if (!tracks.length) loadFeed(); });
+
   useEffect(() => {
     if (loadedRef.current) return;
     loadedRef.current = true;
@@ -63,14 +67,7 @@ export default function Discover() {
     toggleLikeTrack(track);
   };
 
-  const handleShare = (track) => {
-    const title = track.title?.split("|")[0].split("(")[0].trim() || "";
-    shareOrCopy({
-      title: track.title,
-      text: `🎵 Listen to ${title} by ${track.artist} on AuraSynq!`,
-      url: siteUrl(`/player?track=${encodeURIComponent(track.id)}&t=${encodeURIComponent(title)}&a=${encodeURIComponent(track.artist || "")}`),
-    }, "Song link copied to clipboard!");
-  };
+  const handleShare = (track) => shareSong(track);
 
   if (loading) {
     return (

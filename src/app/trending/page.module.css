@@ -1,0 +1,30 @@
+/* Trending: the scattered field scrolls, and every dial floats in place in its own way */
+.scrollMap {
+  flex: 1;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollMap::-webkit-scrollbar { display: none; }
+
+.field {
+  position: relative;
+  width: 100%;
+}
+
+.slot {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+}
+
+/* Moved by its own Web Animation (see page.js); the dial inside handles the press */
+.floater {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  will-change: transform;
+}

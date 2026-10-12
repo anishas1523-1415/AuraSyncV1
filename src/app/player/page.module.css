@@ -1,10 +1,12 @@
+/* Edge to edge: the player fills the whole screen, behind the status bar too, so the clock and
+   icons sit on the player's glow instead of a separate dark strip */
 .container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  position: relative;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   overflow: hidden;
-  margin: -1rem; /* Negate padding */
   background: black;
   color: white;
 }

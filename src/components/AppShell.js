@@ -4,8 +4,10 @@ import { useEffect } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
+import NetworkBanner from "./NetworkBanner";
 import AuraDial from "./AuraDial";
 import { useAndroidBackButton } from "@/lib/backButton";
+import { isMobileApp } from "@/lib/api";
 
 export default function AppShell() {
   const pathname = usePathname();
@@ -39,6 +41,49 @@ export default function AppShell() {
     }
     // openSharedTrack is recreated each render; reacting to URL changes is what matters here
   }, [searchParams, pathname, router]);
+
+  // Light clock and status icons on every screen (the app is always dark)
+  useEffect(() => {
+    if (!isMobileApp) return;
+    import("@capacitor/core")
+      .then(({ SystemBars, SystemBarsStyle }) => SystemBars.setStyle({ style: SystemBarsStyle.Dark }))
+      .catch(() => {});
+  }, []);
+
+  // Share links (https://aurasynq.web.app/s/<id>?t=&a=, /o?p=<path>) and aurasynq:// links that
+  // opened the Android app, both when it was closed and when it was already running
+  useEffect(() => {
+    if (!isMobileApp) return;
+    const handleLink = (raw) => {
+      if (!raw) return;
+      let url;
+      try { url = new URL(raw); } catch (e) { return; }
+      // aurasynq://s/<id> puts "s" in the host; https links have it in the path
+      const parts = (url.protocol === "aurasynq:" ? `/${url.host}${url.pathname}` : url.pathname).split("/").filter(Boolean);
+      if (parts[0] === "s" && parts[1]) {
+        openSharedTrack({
+          id: decodeURIComponent(parts[1]),
+          title: url.searchParams.get("t") || undefined,
+          artist: url.searchParams.get("a") || undefined,
+        }); // shows the "shared song · tap to play" banner
+      } else if (parts[0] === "o") {
+        const target = url.searchParams.get("p");
+        if (target?.startsWith("/")) router.push(target);
+      }
+    };
+    let listener = null;
+    let cancelled = false;
+    import("@capacitor/app").then(async ({ App }) => {
+      const launch = await App.getLaunchUrl().catch(() => null);
+      if (!cancelled) handleLink(launch?.url);
+      listener = await App.addListener("appUrlOpen", (event) => handleLink(event.url));
+      if (cancelled) listener.remove();
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      listener?.remove();
+    };
+  }, []);
 
   // Capture PWA install prompt
   useEffect(() => {
@@ -89,6 +134,7 @@ export default function AppShell() {
     <>
       <MiniPlayer />
       <AuraDial />
+      <NetworkBanner />
 
       {showSharedBanner && (
         <div

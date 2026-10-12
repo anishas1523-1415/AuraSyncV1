@@ -51,5 +51,8 @@ export const CATEGORY_MAP = {
 // The Trends page ("floating hits")
 export const TRENDS_SEEDS = ["latest tamil songs", "trending tamil songs", "tamil hits", "anirudh hits", "tamil melody songs", "tamil kuthu songs"];
 
+// The Trending page: what's hot right now, across languages
+export const TRENDING_SEEDS = ["trending songs", "viral hits", "top songs this week", "new music hits", "latest tamil songs", "hindi hits", "trending english songs", "latest telugu songs"];
+
 // Discover feed: a broad mix
 export const DISCOVER_SEEDS = ["trending songs", "viral hits", "top pop hits", "indie pop", "hip hop hits", "edm hits", "latest tamil songs", "hindi hits", "new music hits"];
