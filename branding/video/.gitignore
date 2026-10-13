@@ -1,0 +1,5 @@
+node_modules/
+out/
+public/clips/
+public/soundtrack.wav
+public/share-card.png
