@@ -23,6 +23,14 @@
           }
         },
         {
+          "client_id": "748353593879-odrot66o9b5klnj2rt99h8oh1t4cp3lb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aurasynq.app",
+            "certificate_hash": "acc5df826a3b0b0b45d0a5be7497386a708772c8"
+          }
+        },
+        {
           "client_id": "748353593879-v2sec65l8t3c8m10rqcplmc04j4cq7r1.apps.googleusercontent.com",
           "client_type": 3
         }
