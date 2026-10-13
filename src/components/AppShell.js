@@ -5,6 +5,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
 import NetworkBanner from "./NetworkBanner";
+import SoftStatusBar from "./SoftStatusBar";
 import AuraDial from "./AuraDial";
 import { useAndroidBackButton } from "@/lib/backButton";
 import { isMobileApp } from "@/lib/api";
@@ -42,11 +43,15 @@ export default function AppShell() {
     // openSharedTrack is recreated each render; reacting to URL changes is what matters here
   }, [searchParams, pathname, router]);
 
-  // Light clock and status icons on every screen (the app is always dark)
+  // The system status bar's icons can only be bright white or black, so the app hides it and shows
+  // its own dim one (SoftStatusBar). Light style for when someone swipes the system bar back in.
   useEffect(() => {
     if (!isMobileApp) return;
     import("@capacitor/core")
-      .then(({ SystemBars, SystemBarsStyle }) => SystemBars.setStyle({ style: SystemBarsStyle.Dark }))
+      .then(({ SystemBars, SystemBarsStyle, SystemBarType }) => Promise.all([
+        SystemBars.setStyle({ style: SystemBarsStyle.Dark }),
+        SystemBars.hide({ bar: SystemBarType.StatusBar }),
+      ]))
       .catch(() => {});
   }, []);
 
@@ -127,14 +132,15 @@ export default function AppShell() {
 
   if (isAuthPage) return null;
 
-  // On the player page the banner is only needed while nothing is playing (e.g. opening a shared link)
-  const showSharedBanner = sharedTrackInfo && !(isPlayerPage && currentTrack);
+  // Shown everywhere (also over the player, where shared links often arrive) until that song plays
+  const showSharedBanner = sharedTrackInfo && currentTrack?.id !== sharedTrackInfo.id;
 
   return (
     <>
       <MiniPlayer />
       <AuraDial />
       <NetworkBanner />
+      {isMobileApp && <SoftStatusBar />}
 
       {showSharedBanner && (
         <div

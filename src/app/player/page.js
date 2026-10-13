@@ -6,6 +6,8 @@ import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "
 import { Play, Pause, SkipBack, SkipForward, CaretDown, Shuffle, ListBullets, Heart, Share, ListPlus } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { shareSong } from "@/lib/share";
+import { isMobileApp } from "@/lib/api";
+import { existingYouTubeElement } from "@/lib/youtubeEmbed";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
@@ -21,6 +23,15 @@ export default function Player() {
   const [showQueue, setShowQueue] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState("next");
   const [playlistTrack, setPlaylistTrack] = useState(null); // song being added to a playlist
+  const coverRef = useRef(null);
+
+  // Website: the song plays in YouTube's player, shown over the cover (YouTube needs it visible)
+  useEffect(() => {
+    if (isMobileApp) return;
+    const media = existingYouTubeElement();
+    media?.showIn(showLyrics || showQueue ? null : coverRef.current);
+    return () => media?.showIn(null);
+  }, [currentTrack?.id, showLyrics, showQueue]);
   useCloseOnBack(showLyrics, () => setShowLyrics(false));
   useCloseOnBack(showQueue, () => setShowQueue(false));
 
@@ -196,6 +207,7 @@ export default function Player() {
 
               <div className={styles.coverContainer} onClick={(e) => e.stopPropagation()}>
                 <img 
+                  ref={(el) => { if (el) coverRef.current = el; }}
                   src={currentTrack.cover} 
                   alt="Cover" 
                   className={`${styles.cover} ${isBuffering ? styles.loadingCover : ''}`} 

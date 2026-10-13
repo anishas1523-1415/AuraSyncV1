@@ -8,6 +8,7 @@ import {
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
 import { relatedSongs, warmCatalog } from "@/lib/catalog";
+import { getYouTubeElement } from "@/lib/youtubeEmbed";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
 // On the web it wraps navigator.mediaSession, so one adapter covers both.
@@ -136,6 +137,10 @@ const fetchAudioForCache = async (url) => {
   });
 };
 const shortTitle = (title = "") => title.split("|")[0].split("(")[0].trim();
+
+// The website plays songs in YouTube's embedded player (browsers can't fetch YouTube audio and
+// the server is blocked by YouTube); the Android app streams on the phone instead
+const USE_YOUTUBE_EMBED = !isMobileApp;
 
 // The Android app streams straight from YouTube on the phone (src/lib/ondevice), loaded on demand
 let onDevicePromise = null;
@@ -289,6 +294,7 @@ export function AudioProvider({ children }) {
   const lastPushedRef = useRef({});
   const currentUserIdRef = useRef(null);
   const waitingForNetworkRef = useRef(null); // song that failed because the phone went offline
+  const mediaHandlersRef = useRef({});
 
   const listenStatsRef = useRef(DEFAULT_STATS);
   const pendingListenRef = useRef(0);
@@ -334,6 +340,17 @@ export function AudioProvider({ children }) {
       ...readStored(AUTO_CACHE_KEY)
     ]);
     setLibraryReady(true);
+    if (USE_YOUTUBE_EMBED) {
+      const media = getYouTubeElement();
+      audioRef.current = media;
+      const events = {
+        play: "onPlay", playing: "onPlaying", pause: "onPause", ended: "onEnded",
+        durationchange: "onDurationChange", loadedmetadata: "onLoadedMetadata", seeked: "onSeeked",
+        timeupdate: "onTimeUpdate", waiting: "onWaiting", error: "onError",
+      };
+      Object.entries(events).forEach(([type, handler]) =>
+        media.addEventListener(type, (event) => mediaHandlersRef.current[handler]?.(event)));
+    }
     // Start the phone's YouTube session (BotGuard) and music lookups early so the first tap is faster
     loadOnDevice().then((ondevice) => ondevice?.warmUp());
     warmCatalog();
@@ -740,7 +757,7 @@ export function AudioProvider({ children }) {
     const trackId = extractId(track);
     const isYouTube = !!trackId && YOUTUBE_ID.test(trackId);
     const online = typeof navigator === "undefined" || navigator.onLine !== false;
-    const isCached = cachedIdsRef.current.has(trackId);
+    const isCached = !USE_YOUTUBE_EMBED && cachedIdsRef.current.has(trackId);
 
     const startNetwork = (src) => {
       audio.src = src;
@@ -1099,6 +1116,7 @@ export function AudioProvider({ children }) {
       loadOnDevice().then((ondevice) => (settingsRef.current.dataSaver ? ondevice?.preResolve([id]) : ondevice?.prefetchTrack(id)));
       return;
     }
+    if (USE_YOUTUBE_EMBED) return;
     fetch(`${streamKey(id)}&warm=1`).catch(() => warmedIdsRef.current.delete(id));
   };
 
@@ -1460,9 +1478,15 @@ export function AudioProvider({ children }) {
     console.warn("Audio element error:", audio.error);
     clearStallTimer();
 
+    // YouTube won't play this one in an embedded player (removed, private or embedding disabled)
+    if (audio.error?.youtubeCode && audio.error.youtubeCode !== 5) {
+      handleStreamFailure();
+      return;
+    }
+
     // Streaming failed but the song is saved on this device: play that copy instead
     const trackId = extractId(track);
-    if (!audio.src.startsWith('blob:') && cachedIdsRef.current.has(trackId)) {
+    if (!USE_YOUTUBE_EMBED && !audio.src.startsWith('blob:') && cachedIdsRef.current.has(trackId)) {
       playFromCache(track, trackId, true);
       return;
     }
@@ -1505,6 +1529,76 @@ export function AudioProvider({ children }) {
     playNext(true);
   };
 
+
+  // Media events, shared by the app's <audio> element and the website's embedded YouTube player
+  const mediaHandlers = {
+    onPlay: () => {
+      setIsPlaying(true);
+      syncPositionState();
+    },
+    onPlaying: () => {
+      clearStallTimer();
+      setIsBuffering(false);
+      consecutiveErrorsRef.current = 0;
+      warmNextTrack();
+    },
+    onPause: () => {
+      clearStallTimer();
+      setIsPlaying(false);
+      flushListenStats();
+      syncPositionState();
+    },
+    onEnded: () => {
+      clearStallTimer();
+      setIsPlaying(false);
+      setProgress(0);
+      playNext(true);
+    },
+    onDurationChange: (e) => {
+      if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
+    },
+    onLoadedMetadata: (e) => {
+      setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
+      syncPositionState();
+    },
+    onSeeked: syncPositionState,
+    onTimeUpdate: (e) => {
+      const a = e.currentTarget;
+      const t = a.currentTime || 0;
+      setProgress(t);
+      if (Number.isFinite(a.duration)) setDuration(a.duration);
+
+      // Count real listening time (seeks and stalls are excluded)
+      if (!a.paused && lastTickRef.current !== null) {
+        const delta = t - lastTickRef.current;
+        if (delta > 0 && delta < 1.5) {
+          pendingListenRef.current += delta;
+          trackListenRef.current += delta;
+        }
+      }
+      lastTickRef.current = t;
+      if (pendingListenRef.current >= 15) flushListenStats();
+      // Playing smoothly again after a reconnect: allow future recoveries
+      if (recoveryRef.current.attempts && t > recoveryRef.current.resumeAt + 10) {
+        recoveryRef.current.attempts = 0;
+      }
+
+      const track = currentTrackRef.current;
+      // Songs downloaded on the phone are cached from that copy; other blobs came from the cache
+      const deviceBlob = track && onDeviceBlobRef.current.id === extractId(track) ? onDeviceBlobRef.current.blob : null;
+      if (!USE_YOUTUBE_EMBED && track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && (deviceBlob || !a.src.startsWith('blob:'))) {
+        trackListenRef.current = -Infinity; // once per play
+        autoCacheTrack(track, deviceBlob);
+      }
+    },
+    onWaiting: () => {
+      setIsBuffering(true);
+      startStallWatch();
+    },
+    onError: handleAudioError,
+  };
+  mediaHandlersRef.current = mediaHandlers;
+
   return (
     <AudioContext.Provider value={{
       currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle, syncUpNext,
@@ -1518,76 +1612,14 @@ export function AudioProvider({ children }) {
       syncNow, isSyncing, lastSyncedAt, isCloudSynced: !!cloudUserId && cloudUserId === user?.id, deleteCloudData
     }}>
       {children}
-      {/* Always mounted: the very first tap must find an element to load and play synchronously */}
-      {mounted && (
+      {/* Always mounted: the very first tap must find an element to load and play synchronously.
+          The website uses YouTube's embedded player instead (wired up on mount). */}
+      {mounted && !USE_YOUTUBE_EMBED && (
         <audio
           ref={audioRef}
           preload="auto"
           style={{ display: "none" }}
-          onPlay={() => {
-            setIsPlaying(true);
-            syncPositionState();
-          }}
-          onPlaying={() => {
-            clearStallTimer();
-            setIsBuffering(false);
-            consecutiveErrorsRef.current = 0;
-            warmNextTrack();
-          }}
-          onPause={() => {
-            clearStallTimer();
-            setIsPlaying(false);
-            flushListenStats();
-            syncPositionState();
-          }}
-          onEnded={() => {
-            clearStallTimer();
-            setIsPlaying(false);
-            setProgress(0);
-            playNext(true);
-          }}
-          onDurationChange={(e) => {
-            if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
-          }}
-          onLoadedMetadata={(e) => {
-            setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
-            syncPositionState();
-          }}
-          onSeeked={syncPositionState}
-          onTimeUpdate={(e) => {
-            const a = e.currentTarget;
-            const t = a.currentTime || 0;
-            setProgress(t);
-            if (Number.isFinite(a.duration)) setDuration(a.duration);
-
-            // Count real listening time (seeks and stalls are excluded)
-            if (!a.paused && lastTickRef.current !== null) {
-              const delta = t - lastTickRef.current;
-              if (delta > 0 && delta < 1.5) {
-                pendingListenRef.current += delta;
-                trackListenRef.current += delta;
-              }
-            }
-            lastTickRef.current = t;
-            if (pendingListenRef.current >= 15) flushListenStats();
-            // Playing smoothly again after a reconnect: allow future recoveries
-            if (recoveryRef.current.attempts && t > recoveryRef.current.resumeAt + 10) {
-              recoveryRef.current.attempts = 0;
-            }
-
-            const track = currentTrackRef.current;
-            // Songs downloaded on the phone are cached from that copy; other blobs came from the cache
-            const deviceBlob = track && onDeviceBlobRef.current.id === extractId(track) ? onDeviceBlobRef.current.blob : null;
-            if (track && trackListenRef.current >= AUTO_CACHE_AFTER_SECONDS && (deviceBlob || !a.src.startsWith('blob:'))) {
-              trackListenRef.current = -Infinity; // once per play
-              autoCacheTrack(track, deviceBlob);
-            }
-          }}
-          onWaiting={() => {
-            setIsBuffering(true);
-            startStallWatch();
-          }}
-          onError={handleAudioError}
+          {...mediaHandlers}
         />
       )}
     </AudioContext.Provider>
