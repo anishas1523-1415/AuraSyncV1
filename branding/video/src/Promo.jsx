@@ -1,10 +1,10 @@
 import {
-  AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, interpolate, spring, staticFile,
+  AbsoluteFill, Audio, Img, Video, Sequence, interpolate, spring, staticFile,
   useCurrentFrame, useVideoConfig, Easing,
 } from "remotion";
 import { loadFont } from "@remotion/google-fonts/Inter";
 
-const { fontFamily } = loadFont("normal", { weights: ["400", "500", "700", "800", "900"] });
+const { fontFamily } = loadFont("normal", { weights: ["400", "500", "700", "800", "900"], subsets: ["latin"] });
 
 export const FPS = 30;
 const BAR = 72; // 100 BPM: one bar = 2.4 s = 72 frames, so every cut lands on the beat
@@ -12,12 +12,18 @@ const BAR = 72; // 100 BPM: one bar = 2.4 s = 72 frames, so every cut lands on t
 // Scene timeline, in bars
 const SCENES = [
   { id: "intro", bars: 2 },
-  { id: "home", bars: 3, clip: "home", from: 0.4, title: ["Pick a", "mood."], sub: "Chill, workout, focus, Tamil: every vibe floats on one screen.", tilt: -6 },
-  { id: "trending", bars: 3, clip: "trending", from: 1.2, title: ["Every hit,", "its own float."], sub: "Trending Now, across languages, alive on screen.", tilt: 6 },
-  { id: "tamil", bars: 3, clip: "tamil", from: 1.6, title: ["Tamil hits", "drift by."], sub: "Slow, endless, never in each other's way.", tilt: -5 },
-  { id: "player", bars: 3, clip: "player", from: 0.6, title: ["Swipe.", "Skip. Feel it."], sub: "A full-screen player made for your thumb.", tilt: 5 },
+  { id: "home", bars: 2, clip: "home", from: 2.6, title: ["Pick a", "mood."], sub: "Chill, workout, focus, Tamil: every vibe floats on one screen.", tilt: -6 },
+  { id: "trending", bars: 3, clip: "trending", from: 0.5, title: ["Every hit,", "its own float."], sub: "Trending Now, across languages, alive on screen.", tilt: 6 },
+  { id: "tamil", bars: 2, clip: "tamil", from: 3.2, title: ["Tamil hits", "drift by."], sub: "Slow, endless, never in each other's way.", tilt: -5 },
+  { id: "search", bars: 2, clip: "search", from: 0.8, title: ["Find it", "in a beat."], sub: "Real songs, real artists, the moment you type.", tilt: 5 },
+  { id: "player", bars: 2, clip: "player", from: 2.2, title: ["Tap. Pause.", "Feel it."], sub: "A full-screen player made for your thumb.", tilt: -5 },
+  { id: "lyrics", bars: 2, clip: "lyrics", from: 2.6, title: ["Sing", "along."], sub: "Synced lyrics, one double tap away.", tilt: 5 },
   { id: "queue", bars: 2, clip: "queue", from: 1, title: ["Your queue,", "in sync."], sub: "One tap fills Up Next with songs that match the mood.", tilt: -5 },
-  { id: "discover", bars: 3, clip: "discover", from: 1, title: ["Discover,", "endlessly."], sub: "A feed of real songs, fresh every time you open it.", tilt: 5 },
+  { id: "discover", bars: 2, clip: "discover", from: 1, title: ["Discover,", "endlessly."], sub: "A feed of real songs, fresh every time you open it.", tilt: 5 },
+  { id: "category", bars: 2, clip: "category", from: 1, title: ["A mix for", "every mood."], sub: "Workout, chill, sleep, focus: fresh songs on every visit.", tilt: -5 },
+  { id: "library", bars: 2, clip: "library", from: 0.5, title: ["Your", "library."], sub: "Liked songs and playlists, always with you.", tilt: 5 },
+  { id: "blend", bars: 2, clip: "blend", from: 1, title: ["Blend with", "a friend."], sub: "Two tastes, one playlist.", tilt: -5 },
+  { id: "society", bars: 2, clip: "society", from: 0.5, title: ["Listen", "together."], sub: "Live rooms with reactions and chat.", tilt: 5 },
   { id: "share", bars: 2, title: ["Share it like", "a story."], sub: "Every song becomes a card, ready for your friends." },
   { id: "profile", bars: 2, clip: "profile", from: 1, title: ["Your aura,", "everywhere."], sub: "Sign in once. Likes, playlists and history follow you.", tilt: -5 },
   { id: "outro", bars: 2 },
@@ -82,7 +88,7 @@ function Phone({ clip, from, tilt = 0, duration }) {
       }}
     >
       <div style={{ width: "100%", height: "100%", borderRadius: 66, overflow: "hidden", background: "#000", position: "relative" }}>
-        <OffthreadVideo src={staticFile(`clips/${clip}.mp4`)} startFrom={Math.round(from * FPS)} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Video src={staticFile(`clips/${clip}.mp4`)} startFrom={Math.round(from * FPS)} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         {/* glass reflection */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(115deg, rgba(255,255,255,0.10) 0%, transparent 32%, transparent 70%, rgba(255,255,255,0.04) 100%)" }} />
       </div>
@@ -232,10 +238,10 @@ function Outro() {
         Your music. Your aura.
       </p>
       <p style={{ fontFamily, fontWeight: 600, fontSize: 32, color: "rgba(255,255,255,0.6)", marginTop: 22, opacity: line(52), letterSpacing: 4, textTransform: "uppercase" }}>
-        Coming soon on Android
+        Available now on Android
       </p>
       <p style={{ fontFamily, fontWeight: 700, fontSize: 32, color: "#f0abfc", marginTop: 18, opacity: line(60) }}>
-        aurasynq.web.app
+        astral-studio.web.app
       </p>
     </AbsoluteFill>
   );
