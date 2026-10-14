@@ -5,6 +5,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
 import NetworkBanner from "./NetworkBanner";
+import AuraTour from "./AuraTour";
 import SoftStatusBar from "./SoftStatusBar";
 import AuraDial from "./AuraDial";
 import { useAndroidBackButton } from "@/lib/backButton";
@@ -140,6 +141,7 @@ export default function AppShell() {
       <MiniPlayer />
       <AuraDial />
       <NetworkBanner />
+      <AuraTour />
       {isMobileApp && <SoftStatusBar />}
 
       {showSharedBanner && (

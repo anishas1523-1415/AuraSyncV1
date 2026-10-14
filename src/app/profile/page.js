@@ -5,11 +5,12 @@ import { useAudio } from "@/contexts/AudioContext";
 import { useState, useEffect, useMemo } from "react";
 import {
   SignOut, MusicNote, Clock, Heart, Gear, Bell, Shield, CaretRight, CaretDown, Play, DownloadSimple, X,
-  Export, Trash, Pause, PencilSimple, Check, Cloud, CloudSlash, UserSwitch, SignIn, UserCircle
+  Export, Trash, Pause, PencilSimple, Check, Cloud, CloudSlash, UserSwitch, SignIn, UserCircle, Planet
 } from "@phosphor-icons/react";
 import { toast } from "@/lib/toast";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
+import { START_TOUR_EVENT } from "@/components/AuraTour";
 
 const timeAgo = (ms) => {
   if (!ms) return "";
@@ -470,6 +471,15 @@ export default function Profile() {
               {openPanel === id && <div className={styles.panel}>{renderPanel(id)}</div>}
             </div>
           ))}
+
+          <div className={styles.settingItem} onClick={() => window.dispatchEvent(new Event(START_TOUR_EVENT))} style={{ cursor: "pointer" }}>
+            <div className={`${styles.settingIcon} ${styles.installIcon}`}><Planet size={20} color="#a855f7" /></div>
+            <div className={styles.settingInfo}>
+              <h4>Take the tour</h4>
+              <p>A quick guided walk through AuraSynq</p>
+            </div>
+            <CaretRight size={18} className={styles.chevron} />
+          </div>
 
           {isGuest ? (
             <div className={styles.settingItem} onClick={() => signOut()} style={{ cursor: "pointer" }}>

@@ -1,0 +1,213 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3500;
+}
+
+.dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 6, 15, 0.82);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: fade 0.35s ease;
+}
+
+/* The aura spotlight: a hole in the night sky that glides between features */
+.spotlight {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(5, 6, 15, 0.82), 0 0 0 2px rgba(236, 72, 153, 0.9), 0 0 40px 8px rgba(168, 85, 247, 0.6);
+  transition: border-radius 0.4s ease; /* position is smoothed in JS */
+  pointer-events: none;
+}
+
+.spotlight::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: inherit;
+  border: 2px solid rgba(168, 85, 247, 0.6);
+  animation: ripple 1.8s ease-out infinite;
+}
+
+@keyframes ripple {
+  0% { transform: scale(0.92); opacity: 0.9; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.card {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 20px 20px 16px;
+  border-radius: 24px;
+  color: white;
+  background: linear-gradient(160deg, rgba(40, 24, 72, 0.92), rgba(14, 16, 32, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(168, 85, 247, 0.2);
+  animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.card h3 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #fff, #f0abfc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.card p {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.orb {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f0abfc, #a855f7 45%, #4c1d95 80%);
+  box-shadow: 0 0 40px rgba(168, 85, 247, 0.8);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe { 50% { transform: scale(1.1); box-shadow: 0 0 60px rgba(236, 72, 153, 0.8); } }
+
+/* Gesture lesson: a mini player card that gets swiped away, then double-tapped */
+.demo {
+  position: relative;
+  height: 130px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.demoCard {
+  position: relative;
+  width: 110px;
+  height: 120px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+  animation: swipeAway 3.6s ease-in-out infinite;
+}
+
+.demoCover { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #a855f7, #ec4899); }
+.demoLine { width: 70px; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.5); }
+.demoLineShort { width: 44px; height: 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.25); }
+
+.stamp {
+  position: absolute;
+  top: 10px;
+  right: 6px;
+  padding: 2px 6px;
+  font-size: 0.65rem;
+  font-weight: 900;
+  color: #fb7185;
+  border: 2px solid #fb7185;
+  border-radius: 6px;
+  transform: rotate(12deg);
+  opacity: 0;
+  animation: stamp 3.6s ease-in-out infinite;
+}
+
+.finger {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.6);
+  animation: finger 3.6s ease-in-out infinite;
+}
+
+.tapRing {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(240, 171, 252, 0.9);
+  opacity: 0;
+  animation: tap 3.6s ease-out infinite;
+}
+
+@keyframes swipeAway {
+  0%, 12% { transform: translateX(0) rotate(0); opacity: 1; }
+  38% { transform: translateX(-120px) rotate(-14deg); opacity: 0; }
+  40% { transform: translateX(120px) rotate(14deg); opacity: 0; }
+  58%, 100% { transform: translateX(0) rotate(0); opacity: 1; }
+}
+
+@keyframes stamp { 0%, 14% { opacity: 0; } 24%, 34% { opacity: 1; } 40%, 100% { opacity: 0; } }
+
+@keyframes finger {
+  0% { transform: translate(30px, 10px); opacity: 0; }
+  10% { transform: translate(30px, 10px); opacity: 1; }
+  36% { transform: translate(-80px, 10px); opacity: 1; }
+  42% { opacity: 0; }
+  62% { transform: translate(0, 0); opacity: 0; }
+  68%, 86% { transform: translate(0, 0); opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes tap {
+  0%, 70% { opacity: 0; transform: scale(1); }
+  72% { opacity: 1; transform: scale(1); }
+  78% { opacity: 0; transform: scale(2.2); }
+  80% { opacity: 1; transform: scale(1); }
+  86% { opacity: 0; transform: scale(2.2); }
+  100% { opacity: 0; }
+}
+
+/* Planets on their own row, buttons below: fits the narrowest phones */
+.footer {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* Progress as a row of planets: lit for done, glowing for now */
+.orbit { display: flex; gap: 6px; align-items: center; }
+.planet { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); transition: all 0.3s ease; }
+.planetDone { background: rgba(240, 171, 252, 0.7); }
+.planetNow { width: 18px; border-radius: 4px; background: linear-gradient(90deg, #a855f7, #ec4899); box-shadow: 0 0 10px rgba(236, 72, 153, 0.8); }
+
+.actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+
+.skip, .back, .next {
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.88rem;
+  border-radius: 14px;
+  padding: 9px 14px;
+}
+
+.skip { background: none; color: rgba(255, 255, 255, 0.55); padding: 9px 6px; }
+.back { background: rgba(255, 255, 255, 0.08); color: white; border: 1px solid rgba(255, 255, 255, 0.12); }
+.next { color: white; background: linear-gradient(135deg, #a855f7, #ec4899); box-shadow: 0 6px 18px rgba(236, 72, 153, 0.35); }
+.next:active, .back:active { transform: scale(0.95); }
+
+@media (prefers-reduced-motion: reduce) {
+  .demoCard, .stamp, .finger, .tapRing, .orb, .spotlight::after { animation: none; }
+  .spotlight { transition: none; }
+}
