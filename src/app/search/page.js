@@ -120,7 +120,9 @@ export default function Search() {
     if (query) {
       saveRecent(query);
     }
-    playTrack(track, trackList);
+    // Only the chosen song: when it ends, Aura Radio queues songs related to it (same mood,
+    // artists, language), not other results that merely share words with the search
+    playTrack(track, [track]);
   };
 
   return (

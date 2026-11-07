@@ -7,7 +7,9 @@ import { getProfile, seedFromLibrary } from "@/lib/ir/profile";
 import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
 
 const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
-const STORE_KEY = "aurasynq_catalog_cache";
+// Versioned: a new ranking must not serve lists ranked by an older one
+const STORE_KEY = "aurasynq_catalog_cache_v2";
+try { localStorage.removeItem("aurasynq_catalog_cache"); } catch (e) {}
 const MAX_STORED = 80;
 const RECENT_HISTORY = 30; // songs played lately sink to the bottom of fresh mixes
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;

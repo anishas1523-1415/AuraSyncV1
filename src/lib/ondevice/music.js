@@ -39,6 +39,9 @@ export async function relatedSongs(videoId) {
   return musicRadio(await getClient(), videoId);
 }
 
+// USB-debug hook: await window.__auraSearch.filmAlbum("leo", { languages: [] })
+if (typeof window !== "undefined") window.__auraSearch = engine;
+
 export function warmUp() {
   getClient().catch(() => {});
 }
