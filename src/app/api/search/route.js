@@ -3,7 +3,8 @@ import { Redis } from '@upstash/redis';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Innertube } from 'youtubei.js';
 import { supabase, isSupabaseActive } from '@/lib/supabase';
-import { searchMusicSongs, musicRadio } from '@/lib/musicTracks';
+import { musicRadio } from '@/lib/musicTracks';
+import { createSearch } from '@/lib/ir/search';
 
 const ytSearch = require('youtube-search-api');
 
@@ -18,10 +19,12 @@ const getMusicClient = () => {
   }
   return musicClientPromise;
 };
-const withMusicTimeout = (promise) => Promise.race([
+const withMusicTimeout = (promise, ms = MUSIC_TIMEOUT_MS) => Promise.race([
   promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error('YouTube Music timed out')), MUSIC_TIMEOUT_MS)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('YouTube Music timed out')), ms)),
 ]);
+// Relevance search: query understanding, film soundtracks, artists, BM25 + popularity ranking
+const searchEngine = createSearch(getMusicClient);
 
 // Search-as-you-type, Discover, categories and Blend all share this budget; cached queries are free
 const RATE_LIMIT_PER_MINUTE = 30;
@@ -222,7 +225,7 @@ async function findTracks(query, relatedTo) {
     return withMusicTimeout(getMusicClient().then(yt => musicRadio(yt, relatedTo))).then(t => t.slice(0, 30));
   }
   try {
-    const songs = await withMusicTimeout(getMusicClient().then(yt => searchMusicSongs(yt, query)));
+    const songs = await withMusicTimeout(searchEngine.search(query), 9000);
     if (songs.length >= MIN_SONG_RESULTS) return songs.slice(0, 30);
   } catch (err) {
     console.warn('YouTube Music search failed, using YouTube search:', err.message);

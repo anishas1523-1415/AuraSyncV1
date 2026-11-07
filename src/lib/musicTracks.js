@@ -17,16 +17,26 @@ const artistsFromSubtitle = (item) => {
   return subtitle.split(" • ")[0].replace(/ & /g, ", ").trim();
 };
 
-const makeTrack = ({ id, title, artist, cover, duration }) => ({
+const makeTrack = ({ id, title, artist, cover, duration, album, plays }) => ({
   id,
   title: title || "Unknown title",
   artist: artist || "Unknown Artist",
+  ...(album ? { album } : {}),
+  ...(plays ? { plays } : {}),
   cover,
   url: `https://www.youtube.com/watch?v=${id}`,
   duration: duration || 0,
   mood: "energetic",
   hue: Math.floor(Math.random() * 360),
 });
+
+// "28M plays" / "1.2B views" -> 28000000 (popularity, used as a ranking prior)
+const parsePlays = (item) => {
+  const text = (item.flex_columns || []).map((c) => c.title?.toString() || "").find((t) => /\b(plays|views)\b/i.test(t));
+  const m = text?.match(/([\d.]+)\s*([KMB])?/i);
+  if (!m) return 0;
+  return Math.round(parseFloat(m[1]) * ({ k: 1e3, m: 1e6, b: 1e9 }[(m[2] || "").toLowerCase()] || 1));
+};
 
 // A song row from music.search(..., { type: "song" })
 export const songToTrack = (item) => item?.id && makeTrack({
@@ -35,6 +45,8 @@ export const songToTrack = (item) => item?.id && makeTrack({
   artist: joinArtists(item.artists) || item.author?.name || artistsFromSubtitle(item),
   cover: largeCover(item.thumbnails, item.id),
   duration: item.duration?.seconds,
+  album: item.album?.name,
+  plays: parsePlays(item),
 });
 
 // An entry of music.getUpNext() (YouTube Music's radio for a song)

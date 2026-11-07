@@ -3,6 +3,8 @@
 // reaction videos) and its radio for "more like this". In the Android app both run on the phone;
 // on the website, and as the app's fallback, through /api/search.
 import { apiUrl, isMobileApp } from "@/lib/api";
+import { getProfile, seedFromLibrary } from "@/lib/ir/profile";
+import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
 
 const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
 const STORE_KEY = "aurasynq_catalog_cache";
@@ -87,9 +89,16 @@ async function lookup(onDevice, serverParams) {
   return fromServer(serverParams);
 }
 
+// A listener's search: full relevance ranking, personalised by their taste profile
 export function searchSongs(query, { fresh = false } = {}) {
   const q = query.trim();
-  return cached(`search:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q), { q }), fresh);
+  return cached(`search:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q, { profile: getProfile() }), { q }), fresh);
+}
+
+// Background searches behind mixes: plain song search, ranked by `personalize` afterwards
+function seedSongs(query, { fresh = false } = {}) {
+  const q = query.trim();
+  return cached(`seed:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q, { light: true }), { q }), fresh);
 }
 
 // Songs that sound like this one: YouTube Music's radio for it (same mood, related artists)
@@ -143,28 +152,31 @@ const freshen = (tracks, count, exclude = new Set()) => {
 
 const settledLists = async (promises) => {
   const results = await Promise.allSettled(promises);
-  const lists = results.filter((r) => r.status === "fulfilled" && r.value.length).map((r) => shuffle(r.value));
+  // Each list keeps its relevance order; variety comes from seed choice and `personalize`
+  const lists = results.filter((r) => r.status === "fulfilled" && r.value.length).map((r) => r.value);
   if (!lists.length) throw results.find((r) => r.status === "rejected")?.reason || new Error("No songs found");
   return lists;
 };
 
-// A mix of a few random searches from `seeds`, avoiding the ones used last time
+// A mix from a few of `seeds` (avoiding last time's), preferring the listener's languages, then
+// ranked by how well each song fits them, with a little variety
 export async function mixSongs(key, seeds, { count = 25, seedsPerMix = 2, fresh = false } = {}) {
   const previous = lastSeeds.get(key) || [];
   const unused = seeds.filter((s) => !previous.includes(s));
-  const chosen = shuffle(unused.length >= seedsPerMix ? unused : seeds).slice(0, seedsPerMix);
+  const chosen = pickSeeds(unused.length >= seedsPerMix ? unused : seeds, seedsPerMix);
   lastSeeds.set(key, chosen);
-  const lists = await settledLists(chosen.map((seed) => searchSongs(seed, { fresh })));
-  return freshen(interleave(lists), count);
+  const lists = await settledLists(chosen.map((seed) => seedSongs(seed, { fresh })));
+  return personalize(freshen(interleave(lists), count * 2), { count });
 }
 
-// Personal mix: radios of a few songs the listener played or liked, so it follows their mood
+// Personal mix: songs that the radios of the listener's favourites (from every side of their
+// taste) agree on, ranked by fit (see recommend.forYou)
 export async function forYouSongs({ history = [], liked = [], fallbackSeeds = [], count = 25, fresh = false }) {
-  const pool = [...history.slice(0, 15), ...liked.slice(0, 15)].filter((t) => t?.id && YOUTUBE_ID.test(t.id));
-  const unique = pool.filter((t, i) => pool.findIndex((o) => o.id === t.id) === i);
-  if (!unique.length) return mixSongs("foryou", fallbackSeeds, { count, fresh });
-
-  const seeds = shuffle(unique).slice(0, 3);
-  const lists = await settledLists(seeds.map((track) => relatedSongs(track, { fresh })));
-  return freshen(interleave(lists), count, new Set(seeds.map((t) => t.id)));
+  seedFromLibrary({ liked, history });
+  const list = await forYou((track) => relatedSongs(track, { fresh }), {
+    count: count * 2,
+    recent: recentlyPlayedIds(),
+    fallback: () => mixSongs("foryou", fallbackSeeds, { count, fresh }),
+  });
+  return freshen(list, count);
 }

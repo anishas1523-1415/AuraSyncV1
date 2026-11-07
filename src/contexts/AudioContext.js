@@ -8,6 +8,8 @@ import {
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
 import { relatedSongs, warmCatalog } from "@/lib/catalog";
+import { recordFeedback, seedFromLibrary } from "@/lib/ir/profile";
+import { rankRadio, radioAnchor, mergeRadio } from "@/lib/ir/recommend";
 import { getYouTubeElement } from "@/lib/youtubeEmbed";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
@@ -299,6 +301,8 @@ export function AudioProvider({ children }) {
   const listenStatsRef = useRef(DEFAULT_STATS);
   const pendingListenRef = useRef(0);
   const trackListenRef = useRef(0);
+  const secondsHeardRef = useRef(0);      // real listening time of the current song (for feedback)
+  const judgedRef = useRef(null);         // song already judged (ended), so it isn't counted twice
   const lastTickRef = useRef(null);
 
   useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
@@ -340,6 +344,7 @@ export function AudioProvider({ children }) {
       ...readStored(AUTO_CACHE_KEY)
     ]);
     setLibraryReady(true);
+    seedFromLibrary({ liked: readStored(LIKED_KEY), history: readStored(HISTORY_KEY) });
     if (USE_YOUTUBE_EMBED) {
       const media = getYouTubeElement();
       audioRef.current = media;
@@ -708,6 +713,19 @@ export function AudioProvider({ children }) {
     originalQueueRef.current = [];
   };
 
+  // Implicit relevance feedback for the song being left: played through, played a while, or
+  // skipped early. Feeds the listener's taste profile (ir/profile).
+  const judgeListen = (ended = false) => {
+    const track = currentTrackRef.current;
+    if (!track || judgedRef.current === track.id) return;
+    const heard = secondsHeardRef.current;
+    const duration = durationRef.current || track.duration || 0;
+    if (ended || (duration && heard >= duration * 0.7)) recordFeedback(track, "complete");
+    else if (heard >= 30) recordFeedback(track, "play");
+    else if (heard < Math.min(30, (duration || 120) * 0.4)) recordFeedback(track, "skip");
+    judgedRef.current = ended ? track.id : null;
+  };
+
   const addToHistory = (track) => {
     if (!settingsRef.current.pauseHistory) {
       const light = lightTrack(track);
@@ -734,10 +752,12 @@ export function AudioProvider({ children }) {
       return;
     }
 
+    judgeListen();
     flushListenStats();
     clearStallTimer();
     recoveryRef.current = { trackId: null, attempts: 0, resumeAt: 0 };
     trackListenRef.current = 0;
+    secondsHeardRef.current = 0;
     lastTickRef.current = null;
 
     const hadOwnLyrics = !!track.lyrics;
@@ -928,10 +948,17 @@ export function AudioProvider({ children }) {
   };
 
   // Songs in the same mood as `seed` (YouTube Music's radio for it) that haven't played lately
+  // Songs in the same mood as `seed`: YouTube Music's radio for it, re-ranked by similarity to the
+  // song playing and to the listener's taste, minus songs they keep skipping (see ir/recommend)
   const radioFor = async (seed, exclude) => {
     const known = new Set([...exclude, ...playHistoryRef.current.slice(0, 30)].map(t => t.id));
-    const related = await relatedSongs(seed);
-    return related.filter(t => t?.id && !known.has(t.id) && !LONG_FORM.test(t.title || "")).slice(0, RADIO_BATCH);
+    const anchor = radioAnchor(seed);
+    const [related, anchorRelated] = await Promise.all([
+      relatedSongs(seed),
+      anchor ? relatedSongs(anchor).catch(() => []) : [],
+    ]);
+    const candidates = mergeRadio(related, anchorRelated).filter(t => !LONG_FORM.test(t.title || ""));
+    return rankRadio(candidates, { current: seed, exclude: known, count: RADIO_BATCH });
   };
 
   // Keep the vibe going: when the queue runs out, append similar tracks instead of looping
@@ -1183,6 +1210,7 @@ export function AudioProvider({ children }) {
 
   const toggleLikeTrack = (track) => {
     if (!track) return;
+    recordFeedback(track, likedTracksRef.current.some(t => t.id === track.id) ? "unlike" : "like");
     touchSyncMeta("liked");
     setLikedTracks(prev => (prev.some(t => t.id === track.id)
       ? prev.filter(t => t.id !== track.id)
@@ -1221,6 +1249,7 @@ export function AudioProvider({ children }) {
 
   const addTrackToPlaylist = (playlistId, track) => {
     if (!track) return;
+    recordFeedback(track, "playlist");
     updatePlaylists(prev => prev.map(p => {
       if (p.id !== playlistId || p.tracks.some(t => t.id === track.id)) return p;
       return { ...p, tracks: [...p.tracks, lightTrack(track)] };
@@ -1549,6 +1578,7 @@ export function AudioProvider({ children }) {
       syncPositionState();
     },
     onEnded: () => {
+      judgeListen(true);
       clearStallTimer();
       setIsPlaying(false);
       setProgress(0);
@@ -1574,6 +1604,7 @@ export function AudioProvider({ children }) {
         if (delta > 0 && delta < 1.5) {
           pendingListenRef.current += delta;
           trackListenRef.current += delta;
+          secondsHeardRef.current += delta;
         }
       }
       lastTickRef.current = t;

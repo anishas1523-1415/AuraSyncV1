@@ -1,0 +1,40 @@
+{
+  "about": "Relevance judgments for AuraSynq search (a small benchmark collection, as in TREC-style evaluation). Each query lists a pattern the right song's title must match; scripts/ir-eval.mjs reports Hit@1, Hit@5, Hit@10 and MRR.",
+  "queries": [
+    { "q": "vaathi coming", "title": "vaathi coming", "kind": "exact" },
+    { "q": "arabic kuthu", "title": "arabic kuthu", "kind": "exact" },
+    { "q": "rowdy baby", "title": "rowdy baby", "kind": "exact" },
+    { "q": "why this kolaveri di", "title": "kolaveri", "kind": "exact" },
+    { "q": "munbe vaa", "title": "munbe vaa", "kind": "exact" },
+    { "q": "hukum", "title": "hukum", "kind": "exact" },
+    { "q": "kesariya", "title": "kesariya", "kind": "exact" },
+    { "q": "shape of you", "title": "shape of you", "kind": "exact" },
+    { "q": "believer imagine dragons", "title": "believer", "kind": "exact" },
+    { "q": "chuttamalle", "title": "chuttamalle", "kind": "exact" },
+    { "q": "srivalli", "title": "srivalli", "kind": "exact" },
+    { "q": "naa ready", "title": "naa ready", "kind": "exact" },
+    { "q": "kaavaalaa", "title": "kaavaalaa", "kind": "exact" },
+    { "q": "ennai thottu", "title": "ennai thottu", "kind": "exact" },
+    { "q": "apna bana le", "title": "apna bana le", "kind": "exact" },
+
+    { "q": "vathi comming", "title": "vaathi coming", "kind": "misspelt" },
+    { "q": "rowdi baby", "title": "rowdy baby", "kind": "misspelt" },
+    { "q": "kavala song", "title": "kaavaalaa", "kind": "misspelt" },
+    { "q": "arabic kuthu song lyrics", "title": "arabic kuthu", "kind": "noisy" },
+    { "q": "kolaveri", "title": "kolaveri", "kind": "partial" },
+
+    { "q": "master movie songs", "title": "vaathi|kutti story|quit pannuda|andha kanna|master", "kind": "movie" },
+    { "q": "jailer songs", "title": "kaavaalaa|hukum|jujubee|rathamaarey|jailer", "kind": "movie" },
+    { "q": "96 movie songs", "title": "(^| )96( |$)|kaathalae|life of ram|vasantha kaalangal|anthaathi|iravingu", "kind": "movie" },
+    { "q": "leo songs", "title": "naa ready|badass|ordinary person|leo|anbenum", "kind": "movie" },
+
+    { "q": "anirudh", "artist": "anirudh", "kind": "artist" },
+    { "q": "sid sriram", "artist": "sid sriram", "kind": "artist" },
+    { "q": "ilaiyaraaja melody", "artist": "ilaiyaraaja", "kind": "artist" },
+    { "q": "ar rahman", "artist": "rahman", "kind": "artist" },
+
+    { "q": "sad tamil songs", "mood": true, "language": "tamil", "kind": "mood" },
+    { "q": "tamil love songs", "mood": true, "language": "tamil", "kind": "mood" },
+    { "q": "workout phonk", "mood": true, "kind": "mood" }
+  ]
+}

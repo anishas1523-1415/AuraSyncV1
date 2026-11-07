@@ -10,6 +10,9 @@ import {
 import { toast } from "@/lib/toast";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
+import { tasteSummary, resetTaste } from "@/lib/ir/profile";
+
+const titleCase = (text = "") => text.replace(/\b\w/g, (c) => c.toUpperCase());
 import { START_TOUR_EVENT } from "@/components/AuraTour";
 
 const timeAgo = (ms) => {
@@ -43,6 +46,8 @@ export default function Profile() {
   } = useAudio();
   const [downloadedSongs, setDownloadedSongs] = useState([]);
   const [openPanel, setOpenPanel] = useState(null); // which settings group is expanded
+  const [taste, setTaste] = useState(null);
+  useEffect(() => { setTaste(tasteSummary()); }, [playHistory]);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [, setClock] = useState(0);
@@ -199,6 +204,17 @@ export default function Profile() {
         <button className={styles.panelBtn} onClick={() => { if (confirm("Clear your listening history?")) clearHistory(); }}>
           <Trash size={16} /> Clear listening history
         </button>
+        <button
+          className={styles.panelBtn}
+          onClick={() => {
+            if (!confirm("Forget what AuraSynq learned about your taste? Recommendations start fresh.")) return;
+            resetTaste();
+            setTaste(tasteSummary());
+            toast("Taste profile reset");
+          }}
+        >
+          <Trash size={16} /> Reset taste profile
+        </button>
         {isSignedIn && (
           <button className={`${styles.panelBtn} ${styles.panelDanger}`} onClick={handleDeleteAccount}>
             <Trash size={16} /> Delete my account
@@ -313,6 +329,46 @@ export default function Profile() {
           </p>
         </div>
       </div>
+
+      {/* What the recommender learned from listening (ir/profile) */}
+      {taste && (taste.languages.length > 0 || taste.artists.length > 0) && (
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>What AuraSynq Learned</h2>
+          <div className={`glass ${styles.learnedCard}`}>
+            {taste.languages.length > 0 && (
+              <div className={styles.learnedRow}>
+                <span className={styles.learnedLabel}>Languages</span>
+                <div className={styles.chips}>
+                  {taste.languages.map((l) => <span key={l.name} className={styles.chip}>{titleCase(l.name)}</span>)}
+                </div>
+              </div>
+            )}
+            {taste.moods.length > 0 && (
+              <div className={styles.learnedRow}>
+                <span className={styles.learnedLabel}>Moods</span>
+                <div className={styles.chips}>
+                  {taste.moods.map((m) => <span key={m.name} className={styles.chip}>{titleCase(m.name)}</span>)}
+                </div>
+              </div>
+            )}
+            {taste.artists.length > 0 && (
+              <div className={styles.learnedRow}>
+                <span className={styles.learnedLabel}>Artists</span>
+                <div className={styles.chips}>
+                  {taste.artists.slice(0, 4).map((a) => <span key={a.name} className={styles.chip}>{titleCase(a.name)}</span>)}
+                </div>
+              </div>
+            )}
+            {taste.radioPrecision !== null && (
+              <p className={styles.learnedNote}>
+                Aura Radio accuracy: <strong>{Math.round(taste.radioPrecision * 100)}%</strong> of its picks played through
+                ({taste.radioJudged} songs)
+              </p>
+            )}
+            <p className={styles.learnedNote}>Finish, like or skip songs and recommendations adjust to you.</p>
+          </div>
+        </section>
+      )}
 
       {/* Taste Breakdown Details */}
       {playHistory.length > 0 && tasteProfile.stats && (

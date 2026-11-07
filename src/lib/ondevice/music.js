@@ -3,7 +3,8 @@
 // Needs no PO token, so it doesn't wait for BotGuard.
 import { Innertube, UniversalCache } from "youtubei-web/web";
 import { nativeFetch } from "./nativeHttp";
-import { searchMusicSongs, musicRadio } from "../musicTracks";
+import { musicRadio, searchMusicSongs } from "../musicTracks";
+import { createSearch } from "../ir/search";
 
 let clientPromise = null;
 
@@ -25,8 +26,13 @@ function getClient() {
   return clientPromise;
 }
 
-export async function searchSongs(query) {
-  return searchMusicSongs(await getClient(), query);
+// Full relevance search (query understanding, film albums, artists, ranking, personal taste)
+const engine = createSearch(getClient);
+
+export async function searchSongs(query, { profile = null, light = false } = {}) {
+  // `light`: plain song search for background mixes, which don't need the extra lookups
+  if (light) return searchMusicSongs(await getClient(), query);
+  return engine.search(query, { profile });
 }
 
 export async function relatedSongs(videoId) {

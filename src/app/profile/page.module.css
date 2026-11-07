@@ -754,3 +754,29 @@
   border-color: rgba(244, 63, 94, 0.35);
   background: rgba(244, 63, 94, 0.08);
 }
+
+/* ─── What AuraSynq learned ─── */
+.learnedCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+}
+
+.learnedRow { display: flex; align-items: center; gap: 0.75rem; }
+.learnedLabel { width: 78px; flex-shrink: 0; font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  color: #e9d5ff;
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.learnedNote { font-size: 0.75rem; color: var(--text-muted); }
+.learnedNote strong { color: #00ffcc; }
