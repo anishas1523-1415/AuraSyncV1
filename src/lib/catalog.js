@@ -9,8 +9,8 @@ import { regionalLanguages } from "@/lib/ir/signals";
 
 const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
 // Versioned: a new ranking must not serve lists ranked by an older one
-const STORE_KEY = "aurasynq_catalog_cache_v2";
-try { localStorage.removeItem("aurasynq_catalog_cache"); } catch (e) {}
+const STORE_KEY = "aurasynq_catalog_cache_v3";
+try { ["aurasynq_catalog_cache", "aurasynq_catalog_cache_v2"].forEach((k) => localStorage.removeItem(k)); } catch (e) {}
 const MAX_STORED = 80;
 const RECENT_HISTORY = 30; // songs played lately sink to the bottom of fresh mixes
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -57,7 +57,8 @@ async function fromServer(params) {
 async function cached(key, load, fresh) {
   restoreCache();
   const hit = cache.get(key);
-  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.tracks;
+  const ttl = key.startsWith("chart:") ? CACHE_MS / 2 : CACHE_MS;
+  if (!fresh && hit && Date.now() - hit.at < ttl) return hit.tracks;
   try {
     const tracks = await load();
     if (tracks.length) {
@@ -72,6 +73,23 @@ async function cached(key, load, fresh) {
   }
 }
 
+// The listener's country (for the charts), from the phone's locale, India by default
+const country = () => {
+  const region = typeof navigator !== "undefined" ? String(navigator.language || "").split("-")[1] : "";
+  return /^[A-Z]{2}$/.test(region || "") ? region : "IN";
+};
+
+// Official YouTube Music charts: kind "now" (trending in the country, leaning toward the
+// listener's languages) or a language ("tamil"). Phone first, the server as fallback.
+export function chartSongs(kind, { fresh = false } = {}) {
+  const languages = regionalLanguages(getProfile());
+  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}`;
+  return cached(key, () => lookup(
+    (m) => m.chartSongs(kind, { country: country(), languages }),
+    { chart: kind, country: country(), langs: languages.join(",") },
+  ), fresh);
+}
+
 // What's trending in the listener's region (their languages): ids of today's trending and
 // latest songs. Loaded in the background; rankings use whatever has arrived so far.
 let trending = null;
@@ -80,11 +98,9 @@ export function trendingIds() {
   if (typeof window === "undefined") return null;
   if (!trendingAt || Date.now() - trendingAt > CACHE_MS) {
     trendingAt = Date.now();
+    // The official charts: trending in the country plus the listener's languages' weekly charts
     const langs = regionalLanguages(getProfile()).slice(0, 2);
-    const queries = langs.length
-      ? langs.flatMap((l) => [`trending ${l} songs`, `latest ${l} songs`])
-      : ["trending songs", "top songs this week"];
-    Promise.allSettled(queries.map((q) => seedSongs(q))).then((results) => {
+    Promise.allSettled([chartSongs("now"), ...langs.map((l) => chartSongs(l))]).then((results) => {
       const ids = new Set(results.flatMap((r) => (r.status === "fulfilled" ? r.value.map((t) => t.id) : [])));
       if (ids.size) trending = ids;
     });

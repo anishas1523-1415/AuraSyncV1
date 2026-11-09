@@ -212,7 +212,9 @@ const gramLogP = (lang, g) => Math.log(((grams[lang][g] || 0) + 0.5) / (gramTota
 // Every confidently identified song teaches its artists' languages (online learning), so artists
 // missing from the table above are covered after a few of their songs have been seen.
 const learned = new Map(); // artist -> { lang: count }
-const LEARN_KEY = "aurasynq_artist_langs";
+// v2: v1 also learned from neighbour guesses, which taught some singers the wrong language
+const LEARN_KEY = "aurasynq_artist_langs_v2";
+try { globalThis.localStorage?.removeItem("aurasynq_artist_langs"); } catch (e) {}
 let learnedLoaded = false;
 const loadLearned = () => {
   if (learnedLoaded) return;
@@ -263,7 +265,8 @@ function artistPrior(artistLine) {
     const seen = learned.get(name);
     if (!seen) continue;
     const total = Object.values(seen).reduce((a, b) => a + b, 0);
-    const trust = Math.min(1, total / 3);
+    // Learned artists never weigh as much as the curated table (at most 0.6, after 5+ songs)
+    const trust = Math.min(0.6, total / 8);
     known += trust;
     for (const [lang, n] of Object.entries(seen)) dist[lang] = (dist[lang] || 0) + trust * (n / total);
   }

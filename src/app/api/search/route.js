@@ -5,6 +5,7 @@ import { Innertube } from 'youtubei.js';
 import { supabase, isSupabaseActive } from '@/lib/supabase';
 import { musicRadio } from '@/lib/musicTracks';
 import { createSearch } from '@/lib/ir/search';
+import { languageTrending, trendingNow } from '@/lib/ir/charts';
 
 const ytSearch = require('youtube-search-api');
 
@@ -240,6 +241,26 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
   const relatedTo = searchParams.get('related');
+  const chart = searchParams.get('chart');
+
+  // Official charts (trending now / a language's weekly chart); cached briefly by the browser
+  if (chart) {
+    if (!/^[a-z]{2,12}$/.test(chart)) {
+      return NextResponse.json({ error: 'Invalid "chart"' }, { status: 400 });
+    }
+    const country = /^[A-Z]{2}$/.test(searchParams.get('country') || '') ? searchParams.get('country') : 'IN';
+    const languages = (searchParams.get('langs') || '').split(',').filter((l) => /^[a-z]{2,12}$/.test(l)).slice(0, 3);
+    try {
+      const yt = await getMusicClient();
+      const tracks = await withMusicTimeout(chart === 'now'
+        ? trendingNow(yt, { country, languages, count: 40 })
+        : languageTrending(yt, chart, { country, count: 40 }), 12000);
+      return NextResponse.json({ tracks }, { headers: { 'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600' } });
+    } catch (err) {
+      console.warn('Chart lookup failed:', err.message);
+      return NextResponse.json({ tracks: [] });
+    }
+  }
 
   if (relatedTo && !/^[A-Za-z0-9_-]{11}$/.test(relatedTo)) {
     return NextResponse.json({ error: 'Invalid "related" video id' }, { status: 400 });

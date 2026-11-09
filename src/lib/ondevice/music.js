@@ -5,6 +5,7 @@ import { Innertube, UniversalCache } from "youtubei-web/web";
 import { nativeFetch } from "./nativeHttp";
 import { musicRadio, searchMusicSongs } from "../musicTracks";
 import { createSearch } from "../ir/search";
+import { languageTrending, trendingNow } from "../ir/charts";
 
 let clientPromise = null;
 
@@ -39,8 +40,15 @@ export async function relatedSongs(videoId) {
   return musicRadio(await getClient(), videoId);
 }
 
+// Official YouTube Music charts: "tamil" (one language) or "now" (the country, leaning toward
+// `languages`)
+export async function chartSongs(kind, { country = "IN", languages = [], count = 40 } = {}) {
+  const yt = await getClient();
+  return kind === "now" ? trendingNow(yt, { country, languages, count }) : languageTrending(yt, kind, { country, count });
+}
+
 // USB-debug hook: await window.__auraSearch.filmAlbum("leo", { languages: [] })
-if (typeof window !== "undefined") window.__auraSearch = engine;
+if (typeof window !== "undefined") window.__auraSearch = { ...engine, chartSongs };
 
 export function warmUp() {
   getClient().catch(() => {});

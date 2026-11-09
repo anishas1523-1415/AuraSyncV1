@@ -156,7 +156,7 @@ export function trackFeatures(track) {
 // ─── Neighbour vote (kNN over YouTube Music's co-listening lists) ───
 // Songs in one radio/up-next list are listened to together and nearly always share a language.
 // Songs whose own evidence is too weak take the list's majority language (if it is clear), and
-// that also teaches their artists' language for next time.
+// (only for ranking: such guesses never teach an artist's language).
 export function classifyList(tracks) {
   const results = tracks.map((t) => classifyTrack(t));
   const counts = {};
@@ -168,9 +168,9 @@ export function classifyList(tracks) {
     // Keep confident answers; unknown or shaky ones (< 0.7) follow a clear neighbour majority
     if (r.language && (r.confidence ?? 1) >= 0.7) return r;
     if (r.language === major) return r;
+    // A guess from neighbours is used for ranking only: it never teaches the artist's language
     const filled = { ...r, language: major, byNeighbours: true };
     cache.set(tracks[i].id || tracks[i].title, filled);
-    learnArtistLanguage(tracks[i].artist, major);
     return filled;
   });
 }

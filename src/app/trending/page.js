@@ -9,7 +9,7 @@ import SyncButton from "@/components/SyncButton";
 import { queueFrom } from "@/lib/ir/recommend";
 import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
-import { mixSongs } from "@/lib/catalog";
+import { mixSongs, chartSongs } from "@/lib/catalog";
 import { TRENDING_SEEDS } from "@/app/category/[slug]/categories";
 
 const ROW_HEIGHT = 150; // a dial, its name and its float fit before the next dial in the column
@@ -104,9 +104,21 @@ export default function Trending() {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef(null);
 
+  const pageRef = useRef(0);
+
+  // YouTube Music's charts for the country (Trending, Daily Top, Top 100, plus the listener's
+  // languages' weekly charts), in rank order; Sync shows the next set. Search mix only as fallback.
   const loadTrending = async (fresh = false) => {
     try {
-      const list = await mixSongs("trending", TRENDING_SEEDS, { count: 16, seedsPerMix: 3, fresh });
+      let list = [];
+      try {
+        const chart = await chartSongs("now");
+        if (chart.length >= 16) {
+          pageRef.current = fresh ? (pageRef.current + 1) % Math.max(1, Math.floor(chart.length / 16)) : 0;
+          list = chart.slice(pageRef.current * 16, (pageRef.current + 1) * 16);
+        }
+      } catch (e) {}
+      if (!list.length) list = await mixSongs("trending", TRENDING_SEEDS, { count: 16, seedsPerMix: 3, fresh });
       setTracks(list);
       prefetchTracks(list);
       mapRef.current?.scrollTo({ top: 0, behavior: "smooth" });
