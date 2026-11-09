@@ -4,7 +4,7 @@
 import { analyzeQuery } from "./query.js";
 import { normalize, tokenize, jaccard, termMatch, parseTitle } from "./text.js";
 import { bm25Scores, coverage, reciprocalRankFusion, qualityPrior, collapseDuplicates, cosine } from "./rank.js";
-import { classifyTrack, trackFeatures } from "./classify.js";
+import { classifyTrack, classifyList, trackFeatures } from "./classify.js";
 import { regionalLanguages, regionalScore, trendScore } from "./signals.js";
 import { songToTrack, isPlayableSong, musicRadio } from "../musicTracks.js";
 
@@ -180,6 +180,7 @@ export function createSearch(getClient) {
     const q = queries[0];
     const regional = regionalLanguages(profile);
     const tracks = fused.map((f) => f.track);
+    classifyList(tracks);
     const bm25 = tracks.map((_, i) => Math.max(...queries.map((v) => bm25ByQuery(v, tracks)[i])));
     const maxBm25 = Math.max(1e-9, ...bm25);
     const maxFused = Math.max(1e-9, ...fused.map((f) => f.fused));

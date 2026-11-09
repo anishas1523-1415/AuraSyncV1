@@ -3,6 +3,7 @@
 // add-one smoothing drowns the evidence; words never seen in training are ignored).
 // The training "documents" are small seed lexicons; artists act as strong language evidence.
 import { tokenize, normalize, parseTitle } from "./text.js";
+import { identifyLanguage, learnArtistLanguage } from "./language.js";
 
 const LANGUAGE_SEEDS = {
   tamil: `kadhal kaadhal kadhale nenjam nenje uyire uyir kanne kannamma penne ponnu poove vaa va
@@ -116,16 +117,22 @@ export function classifyTrack(track) {
     .filter((t) => t.length > 1);
 
   let language = parsed.language || (script && script[1]) || null;
+  let confidence = language ? 1 : 0;
   if (!language) {
-    const result = naiveBayes(languageModel, tokens);
-    if (result.label && result.confidence >= 0.55) language = result.label;
+    // Words, word shapes and artist priors (see language.js)
+    const guess = identifyLanguage({ song: parsed.song, film: parsed.film || track.album || "", artist: track.artist });
+    language = guess.language;
+    confidence = guess.confidence;
+    if (language && guess.confidence >= 0.8) learnArtistLanguage(track.artist, language);
+  } else {
+    learnArtistLanguage(track.artist, language); // explicit marker or script: certain
   }
   const moodResult = naiveBayes(moodModel, tokenize(`${parsed.song} ${parsed.film}`));
   let mood = moodResult.label && moodResult.confidence >= 0.5 ? moodResult.label : null;
   if (!mood && parsed.variants.includes("lofi")) mood = "chill";
   if (!mood && parsed.variants.includes("slowed")) mood = "chill";
 
-  const result = { language, mood, film: parsed.film || null };
+  const result = { language, mood, film: parsed.film || null, confidence };
   if (cache.size > 2000) cache.clear();
   cache.set(key, result);
   return result;
@@ -144,4 +151,26 @@ export function trackFeatures(track) {
   if (mood) features[`mood:${mood}`] = 0.7;
   if (film) features[`film:${normalize(film)}`] = 0.6;
   return features;
+}
+
+// ─── Neighbour vote (kNN over YouTube Music's co-listening lists) ───
+// Songs in one radio/up-next list are listened to together and nearly always share a language.
+// Songs whose own evidence is too weak take the list's majority language (if it is clear), and
+// that also teaches their artists' language for next time.
+export function classifyList(tracks) {
+  const results = tracks.map((t) => classifyTrack(t));
+  const counts = {};
+  results.forEach((r) => { if (r.language) counts[r.language] = (counts[r.language] || 0) + 1; });
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const [major, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  if (!major || n / total < 0.6 || n < 3) return results;
+  return results.map((r, i) => {
+    // Keep confident answers; unknown or shaky ones (< 0.7) follow a clear neighbour majority
+    if (r.language && (r.confidence ?? 1) >= 0.7) return r;
+    if (r.language === major) return r;
+    const filled = { ...r, language: major, byNeighbours: true };
+    cache.set(tracks[i].id || tracks[i].title, filled);
+    learnArtistLanguage(tracks[i].artist, major);
+    return filled;
+  });
 }

@@ -1,0 +1,487 @@
+{
+ "about": "Labelled songs for the language classifier (scripts/lang-eval.mjs). Includes multilingual composers and singers, whose songs exist in several languages. 'held_out' songs were never used to build the word lists: their score is the honest one.",
+ "tracks": [
+  [
+   "Vaathi Coming",
+   "Anirudh Ravichander, Gana Balachandar",
+   "tamil"
+  ],
+  [
+   "Raavana Mavandaa",
+   "Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Gaali Vaaluga",
+   "Anirudh Ravichander",
+   "telugu"
+  ],
+  [
+   "Adhento Gaani Vunnapaatuga",
+   "Anirudh Ravichander",
+   "telugu"
+  ],
+  [
+   "Zinda Banda",
+   "Anirudh Ravichander, Shah Rukh Khan",
+   "hindi"
+  ],
+  [
+   "Chaleya",
+   "Arijit Singh, Shilpa Rao",
+   "hindi"
+  ],
+  [
+   "Kaavaalaa",
+   "Shilpa Rao, Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Hukum - Thalaivar Alappara",
+   "Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Rowdy Baby",
+   "Dhanush, Dhee",
+   "tamil"
+  ],
+  [
+   "Why This Kolaveri Di",
+   "Dhanush",
+   "tamil"
+  ],
+  [
+   "Munbe Vaa",
+   "Naresh Iyer, Shreya Ghoshal",
+   "tamil"
+  ],
+  [
+   "Ennai Thottu",
+   "Ilaiyaraaja, S.P. Balasubrahmanyam",
+   "tamil"
+  ],
+  [
+   "Kannana Kanne",
+   "D. Imman, Sid Sriram",
+   "tamil"
+  ],
+  [
+   "Samajavaragamana",
+   "Sid Sriram, Thaman S",
+   "telugu"
+  ],
+  [
+   "Inkem Inkem Inkem Kaavaale",
+   "Sid Sriram",
+   "telugu"
+  ],
+  [
+   "Srivalli",
+   "Sid Sriram, Devi Sri Prasad",
+   "telugu"
+  ],
+  [
+   "Oo Antava Oo Oo Antava",
+   "Indravathi Chauhan, Devi Sri Prasad",
+   "telugu"
+  ],
+  [
+   "Naatu Naatu",
+   "Rahul Sipligunj, Kaala Bhairava",
+   "telugu"
+  ],
+  [
+   "Butta Bomma",
+   "Armaan Malik, Thaman S",
+   "telugu"
+  ],
+  [
+   "Ramuloo Ramulaa",
+   "Anurag Kulkarni, Mangli",
+   "telugu"
+  ],
+  [
+   "Kurchi Madathapetti",
+   "Sahithi Chaganti, Sri Krishna",
+   "telugu"
+  ],
+  [
+   "Nee Kallalona",
+   "Anurag Kulkarni",
+   "telugu"
+  ],
+  [
+   "Kesariya",
+   "Arijit Singh, Pritam",
+   "hindi"
+  ],
+  [
+   "Tum Hi Ho",
+   "Arijit Singh",
+   "hindi"
+  ],
+  [
+   "Apna Bana Le",
+   "Arijit Singh, Sachin-Jigar",
+   "hindi"
+  ],
+  [
+   "Raataan Lambiyan",
+   "Jubin Nautiyal, Asees Kaur",
+   "hindi"
+  ],
+  [
+   "Kun Faya Kun",
+   "A.R. Rahman, Javed Ali, Mohit Chauhan",
+   "hindi"
+  ],
+  [
+   "Jai Ho",
+   "A.R. Rahman, Sukhwinder Singh",
+   "hindi"
+  ],
+  [
+   "Chaiyya Chaiyya",
+   "Sukhwinder Singh, Sapna Awasthi",
+   "hindi"
+  ],
+  [
+   "Pehle Bhi Main",
+   "Vishal Mishra",
+   "hindi"
+  ],
+  [
+   "Mazhai Kuruvi",
+   "A.R. Rahman",
+   "tamil"
+  ],
+  [
+   "Nenjukkul Peidhidum",
+   "Harris Jayaraj, Hariharan",
+   "tamil"
+  ],
+  [
+   "Uyire Uyire",
+   "Hariharan, K.S. Chithra",
+   "tamil"
+  ],
+  [
+   "Thallumaala",
+   "Vishnu Vijay",
+   "malayalam"
+  ],
+  [
+   "Jimikki Kammal",
+   "Vineeth Sreenivasan, Ranjith Unni",
+   "malayalam"
+  ],
+  [
+   "Malare",
+   "Vijay Yesudas, Rajesh Murugesan",
+   "malayalam"
+  ],
+  [
+   "Illuminati",
+   "Sushin Shyam, Dabzee",
+   "malayalam"
+  ],
+  [
+   "Darshana",
+   "Hesham Abdul Wahab, Hridayam",
+   "malayalam"
+  ],
+  [
+   "Kudukku",
+   "Vineeth Sreenivasan",
+   "malayalam"
+  ],
+  [
+   "Belageddu",
+   "Vijay Prakash, Arjun Janya",
+   "kannada"
+  ],
+  [
+   "Karabuu",
+   "Chandan Shetty",
+   "kannada"
+  ],
+  [
+   "Bombe Helutaite",
+   "Puneeth Rajkumar, V. Harikrishna",
+   "kannada"
+  ],
+  [
+   "Brown Munde",
+   "AP Dhillon, Gurinder Gill",
+   "punjabi"
+  ],
+  [
+   "Lover",
+   "Diljit Dosanjh",
+   "punjabi"
+  ],
+  [
+   "Excuses",
+   "AP Dhillon, Gurinder Gill",
+   "punjabi"
+  ],
+  [
+   "Shape of You",
+   "Ed Sheeran",
+   "english"
+  ],
+  [
+   "Blinding Lights",
+   "The Weeknd",
+   "english"
+  ],
+  [
+   "Believer",
+   "Imagine Dragons",
+   "english"
+  ],
+  [
+   "Perfect",
+   "Ed Sheeran",
+   "english"
+  ],
+  [
+   "Cruel Summer",
+   "Taylor Swift",
+   "english"
+  ],
+  [
+   "Senorita",
+   "Shawn Mendes, Camila Cabello",
+   "english"
+  ],
+  [
+   "Hukum - Hindi",
+   "Anirudh Ravichander",
+   "hindi"
+  ],
+  [
+   "Kaavaalaa (Telugu)",
+   "Anirudh Ravichander",
+   "telugu"
+  ],
+  [
+   "Naa Ready (From \"Leo\")",
+   "Anirudh Ravichander, Vijay",
+   "tamil"
+  ],
+  [
+   "Ordinary Person (From \"Leo\")",
+   "Anirudh Ravichander, Nikhita Gandhi",
+   "tamil"
+  ],
+  [
+   "Pathala Pathala",
+   "Kamal Haasan, Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Jalabulajangu",
+   "Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Manasilaayo",
+   "Anirudh Ravichander, Malaysia Vasudevan",
+   "tamil"
+  ],
+  [
+   "Fear Song",
+   "Anirudh Ravichander",
+   "telugu"
+  ],
+  [
+   "Chuttamalle",
+   "Shilpa Rao",
+   "telugu"
+  ]
+ ],
+ "held_out": [
+  [
+   "Thee Thalapathy",
+   "Silambarasan TR, Thaman S",
+   "tamil"
+  ],
+  [
+   "Arabic Kuthu",
+   "Anirudh Ravichander, Jonita Gandhi",
+   "tamil"
+  ],
+  [
+   "Megham Karukatha",
+   "Dhanush, Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Enjoy Enjaami",
+   "Dhee, Arivu",
+   "tamil"
+  ],
+  [
+   "Pachai Nirame",
+   "Hariharan, Clinton Cerejo",
+   "tamil"
+  ],
+  [
+   "Vaseegara",
+   "Bombay Jayashree, Harris Jayaraj",
+   "tamil"
+  ],
+  [
+   "Kannaana Kanney",
+   "D. Imman, Sid Sriram",
+   "tamil"
+  ],
+  [
+   "Rathamaarey",
+   "Vishal Mishra, Anirudh Ravichander",
+   "tamil"
+  ],
+  [
+   "Jai Balayya",
+   "Thaman S, Karimulla",
+   "telugu"
+  ],
+  [
+   "Kalaavathi",
+   "Sid Sriram, Thaman S",
+   "telugu"
+  ],
+  [
+   "Saami Saami",
+   "Mounika Yadav, Devi Sri Prasad",
+   "telugu"
+  ],
+  [
+   "Mind Block",
+   "Blaaze, Ranina Reddy, Devi Sri Prasad",
+   "telugu"
+  ],
+  [
+   "Dhinka Chika",
+   "Mika Singh, Amrita Kak",
+   "hindi"
+  ],
+  [
+   "Kaise Hua",
+   "Vishal Mishra",
+   "hindi"
+  ],
+  [
+   "Maan Meri Jaan",
+   "King",
+   "hindi"
+  ],
+  [
+   "Tere Vaaste",
+   "Varun Jain, Sachin-Jigar",
+   "hindi"
+  ],
+  [
+   "Satranga",
+   "Arijit Singh",
+   "hindi"
+  ],
+  [
+   "Heeriye",
+   "Jasleen Royal, Arijit Singh",
+   "hindi"
+  ],
+  [
+   "Lutt Putt Gaya",
+   "Arijit Singh, Pritam",
+   "hindi"
+  ],
+  [
+   "Ve Kamleya",
+   "Arijit Singh, Shreya Ghoshal",
+   "hindi"
+  ],
+  [
+   "Pavizha Mazha",
+   "K.S. Harisankar",
+   "malayalam"
+  ],
+  [
+   "Uyiril Thodum",
+   "Sushin Shyam, Sooraj Santhosh",
+   "malayalam"
+  ],
+  [
+   "Entammede Jimikki Kammal",
+   "Vineeth Sreenivasan",
+   "malayalam"
+  ],
+  [
+   "Kanne Adhirindhi",
+   "Mangli",
+   "telugu"
+  ],
+  [
+   "Singara Siriye",
+   "Vijay Prakash, Ananya Bhat",
+   "kannada"
+  ],
+  [
+   "Salaam Rocky Bhai",
+   "Vijay Prakash, Ravi Basrur",
+   "kannada"
+  ],
+  [
+   "Softly",
+   "Karan Aujla",
+   "punjabi"
+  ],
+  [
+   "With You",
+   "AP Dhillon",
+   "punjabi"
+  ],
+  [
+   "Lemonade",
+   "Diljit Dosanjh",
+   "punjabi"
+  ],
+  [
+   "As It Was",
+   "Harry Styles",
+   "english"
+  ],
+  [
+   "Flowers",
+   "Miley Cyrus",
+   "english"
+  ],
+  [
+   "Levitating",
+   "Dua Lipa",
+   "english"
+  ],
+  [
+   "Calm Down",
+   "Rema, Selena Gomez",
+   "english"
+  ],
+  [
+   "Kesariya Rangu",
+   "Arijit Singh, Sid Sriram",
+   "telugu"
+  ],
+  [
+   "Mazhaiyae Mazhaiyae",
+   "Shankar Mahadevan",
+   "tamil"
+  ],
+  [
+   "Yaarumilla",
+   "Jonita Gandhi",
+   "tamil"
+  ]
+ ]
+}

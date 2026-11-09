@@ -1,6 +1,6 @@
 "use client";
 // Recommendations: what to play next and what to put in personal mixes.
-import { trackFeatures } from "./classify.js";
+import { trackFeatures, classifyList } from "./classify.js";
 import { cosine, diversify, collapseDuplicates } from "./rank.js";
 import { getProfile, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
 import { regionalLanguages, regionalScore, trendScore, continuityScore } from "./signals.js";
@@ -13,6 +13,7 @@ export function rankRadio(candidates, { current, exclude = new Set(), count = 10
   const profile = getProfile();
   const languages = regionalLanguages(profile);
   const context = current ? trackFeatures(current) : {};
+  classifyList(current ? [current, ...candidates] : candidates); // neighbour vote fills unknown languages
   const scored = candidates
     .filter((t) => t?.id && !exclude.has(t.id) && !isRejected(t))
     .map((track, rank) => {
@@ -101,6 +102,7 @@ export async function forYou(getRelated, { count = 25, recent = new Set(), fallb
 export function personalize(tracks, { count = 25, trending = null } = {}) {
   const profile = getProfile();
   const languages = regionalLanguages(profile);
+  classifyList(tracks);
   const scored = tracks.map((track, rank) => ({
     track,
     score: 0.5 / (1 + rank * 0.08) + (profile ? 0.4 * cosine(profile, trackFeatures(track)) : 0) +
