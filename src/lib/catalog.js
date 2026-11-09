@@ -6,6 +6,8 @@ import { apiUrl, isMobileApp } from "@/lib/api";
 import { getProfile, seedFromLibrary } from "@/lib/ir/profile";
 import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
 import { regionalLanguages } from "@/lib/ir/signals";
+import { momentPicks } from "@/lib/ir/recommend";
+import { normalize } from "@/lib/ir/text";
 
 const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
 // Versioned: a new ranking must not serve lists ranked by an older one
@@ -107,6 +109,49 @@ export function trendingIds() {
   }
   return trending;
 }
+
+// ─── Search suggestions ───
+// Autocomplete = the listener's own recent searches and artists that start with what they typed
+// (instant, no network), then YouTube Music's suggestions for it.
+const suggestCache = new Map();
+
+export function localSuggestions(text) {
+  const q = normalize(text);
+  if (!q || typeof window === "undefined") return [];
+  const out = [];
+  try {
+    JSON.parse(localStorage.getItem("aurasynq_recent_searches") || "[]")
+      .filter((s) => normalize(s).startsWith(q) && normalize(s) !== q)
+      .slice(0, 3)
+      .forEach((s) => out.push({ text: s, kind: "recent" }));
+  } catch (e) {}
+  Object.entries(getProfile() || {})
+    .filter(([k, v]) => k.startsWith("artist:") && v > 0.05 && k.slice(7).startsWith(q) && k.slice(7) !== q)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .forEach(([k]) => out.push({ text: k.slice(7).replace(/\b\w/g, (c) => c.toUpperCase()), kind: "artist" }));
+  return out;
+}
+
+export async function suggestQueries(text) {
+  const q = text.trim();
+  if (!q) return [];
+  const key = q.toLowerCase();
+  if (suggestCache.has(key)) return suggestCache.get(key);
+  let list = [];
+  try {
+    const music = await loadMusic();
+    list = music
+      ? await music.suggestQueries(q)
+      : (await (await fetch(apiUrl(`/api/search?${new URLSearchParams({ suggest: q })}`))).json()).suggestions || [];
+  } catch (e) {}
+  if (suggestCache.size > 200) suggestCache.clear();
+  suggestCache.set(key, list);
+  return list;
+}
+
+// "For this moment" chips on the Search screen
+export const searchMoments = () => momentPicks();
 
 // Open the phone's YouTube Music connection early, so the first list loads sooner
 export function warmCatalog() {

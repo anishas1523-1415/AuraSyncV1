@@ -9,7 +9,7 @@ import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
 import { relatedSongs, warmCatalog, trendingIds } from "@/lib/catalog";
 import { recordFeedback, seedFromLibrary } from "@/lib/ir/profile";
-import { rankRadio, radioAnchor, mergeRadio } from "@/lib/ir/recommend";
+import { rankRadio, radioAnchor, mergeRadio, rerankUpcoming } from "@/lib/ir/recommend";
 import { getYouTubeElement } from "@/lib/youtubeEmbed";
 
 // Capacitor MediaSession plugin: drives the Android notification / lock screen controls.
@@ -303,6 +303,7 @@ export function AudioProvider({ children }) {
   const trackListenRef = useRef(0);
   const secondsHeardRef = useRef(0);      // real listening time of the current song (for feedback)
   const judgedRef = useRef(null);         // song already judged (ended), so it isn't counted twice
+  const reorderPendingRef = useRef(false); // a skip happened: re-rank Up Next once the next song plays
   const lastTickRef = useRef(null);
 
   useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
@@ -722,8 +723,27 @@ export function AudioProvider({ children }) {
     const duration = durationRef.current || track.duration || 0;
     if (ended || (duration && heard >= duration * 0.7)) recordFeedback(track, "complete");
     else if (heard >= 30) recordFeedback(track, "play");
-    else if (heard < Math.min(30, (duration || 120) * 0.4)) recordFeedback(track, "skip");
+    else if (heard < Math.min(30, (duration || 120) * 0.4)) {
+      recordFeedback(track, "skip");
+      reorderPendingRef.current = true; // what's still queued adapts to the skip
+    }
     judgedRef.current = ended ? track.id : null;
+  };
+
+  // After a skip: songs like the skipped one sink in Up Next, ones matching the updated mood rise.
+  // The song that is next stays put (it may already be preloading). Shuffle order is left alone.
+  const reorderUpNext = () => {
+    reorderPendingRef.current = false;
+    const current = currentTrackRef.current;
+    const q = queueRef.current;
+    if (!current || isShuffleRef.current) return;
+    const index = q.findIndex((t) => t.id === current.id);
+    if (index === -1 || q.length - index - 1 < 3) return;
+    const next = [...q.slice(0, index + 1), ...rerankUpcoming(q.slice(index + 1), { current })];
+    if (isSameQueue(next, q)) return;
+    originalQueueRef.current = next;
+    commitQueue(next);
+    warmNextTrack();
   };
 
   const addToHistory = (track) => {
@@ -1573,7 +1593,11 @@ export function AudioProvider({ children }) {
       // Next shows what follows and the next song can preload
       const current = currentTrackRef.current;
       const q = queueRef.current;
-      if (current && settingsRef.current.autoplay && q.length && q[q.length - 1].id === current.id) {
+      if (reorderPendingRef.current) reorderUpNext();
+      // Top up early: with two songs or fewer left, line up related ones now, so Up Next never
+      // runs dry and the next song can preload
+      const position = current ? q.findIndex((t) => t.id === current.id) : -1;
+      if (current && settingsRef.current.autoplay && position !== -1 && q.length - position - 1 <= 2) {
         extendQueueWithRadio(current).then(() => warmNextTrack());
       }
       warmNextTrack();

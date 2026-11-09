@@ -1,12 +1,12 @@
 "use client";
 import styles from "./page.module.css";
-import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus } from "@phosphor-icons/react";
+import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus, User, Sparkle } from "@phosphor-icons/react";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 import { toast } from "@/lib/toast";
-import { searchSongs } from "@/lib/catalog";
+import { searchSongs, suggestQueries, localSuggestions, searchMoments } from "@/lib/catalog";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 
@@ -32,6 +32,27 @@ export default function Search() {
   const inputRef = useRef(null);
   const lastSearchedRef = useRef("");
   const requestIdRef = useRef(0);
+  const [suggestions, setSuggestions] = useState([]);
+  const [focused, setFocused] = useState(false);
+  const [moments, setMoments] = useState([]);
+  useEffect(() => { setMoments(searchMoments()); }, []);
+
+  // Autocomplete while typing: the listener's own recents/artists instantly, then YouTube Music's
+  useEffect(() => {
+    const text = query.trim();
+    if (!text) { setSuggestions([]); return; }
+    setSuggestions(localSuggestions(text));
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      suggestQueries(text).then((remote) => {
+        if (cancelled) return;
+        const local = localSuggestions(text);
+        const seen = new Set(local.map((s) => s.text.toLowerCase()));
+        setSuggestions([...local, ...remote.filter((r) => !seen.has(r.toLowerCase()) && r.toLowerCase() !== text.toLowerCase()).map((r) => ({ text: r, kind: "suggest" }))].slice(0, 7));
+      });
+    }, 160);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query]);
 
   useEffect(() => {
     try {
@@ -139,6 +160,8 @@ export default function Search() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); if (!e.target.value) setResults([]); }}
             onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setTimeout(() => setFocused(false), 150)}
           />
           {query && (
             <button className={styles.clearBtn} onClick={() => { setQuery(""); setResults([]); inputRef.current?.focus(); }}>
@@ -147,6 +170,22 @@ export default function Search() {
           )}
         </div>
       </header>
+
+      {focused && suggestions.length > 0 && (
+        <div className={`glass ${styles.suggestions}`}>
+          {suggestions.map((s) => (
+            <div
+              key={`${s.kind}-${s.text}`}
+              className={styles.suggestion}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setQuery(s.text); setFocused(false); inputRef.current?.blur(); doSearch(s.text); }}
+            >
+              {s.kind === "recent" ? <ClockCounterClockwise size={16} /> : s.kind === "artist" ? <User size={16} /> : <MagnifyingGlass size={16} />}
+              <span>{s.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading && (
         <div className={styles.loadingBar}>
@@ -187,6 +226,19 @@ export default function Search() {
 
       {results.length === 0 && !loading && (
         <>
+          {moments.length > 0 && (
+            <section className={styles.section}>
+              <h2><Sparkle size={16} weight="fill" style={{ verticalAlign: "-2px", marginRight: 6 }} />For this moment</h2>
+              <div className={styles.chips}>
+                {moments.map((m) => (
+                  <button key={m.query} className={styles.momentChip} onClick={() => { setQuery(m.query); doSearch(m.query); }}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
           {recentSearches.length > 0 && (
             <section className={styles.section}>
               <h2>Recent Searches</h2>

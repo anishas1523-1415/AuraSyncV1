@@ -82,3 +82,13 @@ export async function musicRadio(yt, videoId) {
     .map(upNextToTrack)
     .filter((track) => isPlayableSong(track) && track.id !== videoId);
 }
+
+// YouTube Music's own autocomplete for a half-typed query
+export async function musicSuggestions(yt, query) {
+  const sections = await yt.music.getSearchSuggestions(query);
+  const seen = new Set();
+  return (sections || [])
+    .flatMap((section) => (section.contents || []).map((c) => c.suggestion?.toString?.() || ""))
+    .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()))
+    .slice(0, 8);
+}

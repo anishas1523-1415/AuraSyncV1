@@ -3,7 +3,7 @@ import { Redis } from '@upstash/redis';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Innertube } from 'youtubei.js';
 import { supabase, isSupabaseActive } from '@/lib/supabase';
-import { musicRadio } from '@/lib/musicTracks';
+import { musicRadio, musicSuggestions } from '@/lib/musicTracks';
 import { createSearch } from '@/lib/ir/search';
 import { languageTrending, trendingNow } from '@/lib/ir/charts';
 
@@ -242,6 +242,18 @@ export async function GET(request) {
   const query = searchParams.get('q');
   const relatedTo = searchParams.get('related');
   const chart = searchParams.get('chart');
+
+  // Autocomplete for the search box
+  if (searchParams.has('suggest')) {
+    const text = (searchParams.get('suggest') || '').trim().slice(0, 100);
+    if (!text) return NextResponse.json({ suggestions: [] });
+    try {
+      const suggestions = await withMusicTimeout(getMusicClient().then(yt => musicSuggestions(yt, text)), 4000);
+      return NextResponse.json({ suggestions }, { headers: { 'Cache-Control': 'public, s-maxage=3600' } });
+    } catch (err) {
+      return NextResponse.json({ suggestions: [] });
+    }
+  }
 
   // Official charts (trending now / a language's weekly chart); cached briefly by the browser
   if (chart) {

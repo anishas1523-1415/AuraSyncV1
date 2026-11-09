@@ -2,7 +2,8 @@
 // Recommendations: what to play next and what to put in personal mixes.
 import { trackFeatures, classifyList } from "./classify.js";
 import { cosine, diversify, collapseDuplicates } from "./rank.js";
-import { getProfile, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
+import { getProfile, getIntent, getSession, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
+import { timeOfDay } from "./context.js";
 import { regionalLanguages, regionalScore, trendScore, continuityScore } from "./signals.js";
 
 // ─── Aura Radio: songs after the current one ───
@@ -11,6 +12,7 @@ import { regionalLanguages, regionalScore, trendScore, continuityScore } from ".
 // taste, rejected songs are dropped, and runs of one artist are broken up (MMR).
 export function rankRadio(candidates, { current, exclude = new Set(), count = 10, trending = null }) {
   const profile = getProfile();
+  const intent = getIntent(); // taste + this session's mood + time of day
   const languages = regionalLanguages(profile);
   const context = current ? trackFeatures(current) : {};
   classifyList(current ? [current, ...candidates] : candidates); // neighbour vote fills unknown languages
@@ -23,7 +25,7 @@ export function rankRadio(candidates, { current, exclude = new Set(), count = 10
       // Relevance to the song playing (features + mood/language continuity) comes first, then the
       // listener's taste, their region's language and what's trending
       const s = 0.3 * base + 0.35 * cosine(context, f) + continuityScore(current, track) +
-        (profile ? 0.4 * cosine(profile, f) : 0) + 0.5 * regionalScore(track, languages) + trendScore(track, trending);
+        (intent ? 0.45 * cosine(intent, f) : 0) + 0.5 * regionalScore(track, languages) + trendScore(track, trending);
       return { track, score: s };
     })
     .sort((a, b) => b.score - a.score);
@@ -100,12 +102,12 @@ export async function forYou(getRelated, { count = 25, recent = new Set(), fallb
 
 // ─── Mood/category mixes: relevant first, personal second, a little variety ───
 export function personalize(tracks, { count = 25, trending = null } = {}) {
-  const profile = getProfile();
-  const languages = regionalLanguages(profile);
+  const intent = getIntent();
+  const languages = regionalLanguages(getProfile());
   classifyList(tracks);
   const scored = tracks.map((track, rank) => ({
     track,
-    score: 0.5 / (1 + rank * 0.08) + (profile ? 0.4 * cosine(profile, trackFeatures(track)) : 0) +
+    score: 0.5 / (1 + rank * 0.08) + (intent ? 0.4 * cosine(intent, trackFeatures(track)) : 0) +
       regionalScore(track, languages) + trendScore(track, trending) + Math.random() * 0.06,
   })).filter(({ track }) => !isRejected(track)).sort((a, b) => b.score - a.score);
   return diversify(scored, { lambda: 0.8, count, features: trackFeatures }).map((p) => p.track);
@@ -149,4 +151,57 @@ export function queueFrom(track, list = []) {
     .sort((a, b) => b.score - a.score)
     .map(({ t }) => t);
   return [track, ...rest];
+}
+
+// ─── Live queue: re-rank what is still to come ───
+// Called right after the listener skips (or likes) something, so the next songs adapt at once:
+// songs like the skipped one sink, songs that fit the updated session rise, the song that is
+// already next stays put (it may be preloading), and songs they keep rejecting are dropped.
+export function rerankUpcoming(upcoming, { current }) {
+  if (upcoming.length < 3) return upcoming;
+  const [next, ...rest] = upcoming;
+  const intent = getIntent();
+  const context = current ? trackFeatures(current) : {};
+  const scored = rest
+    .filter((t) => !isRejected(t))
+    .map((track, i) => ({
+      track,
+      score: 0.35 / (1 + i * 0.1) + 0.3 * cosine(context, trackFeatures(track)) +
+        continuityScore(current, track) + (intent ? 0.45 * cosine(intent, trackFeatures(track)) : 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+  return [next, ...diversify(scored, { lambda: 0.75, count: scored.length, features: trackFeatures }).map((p) => p.track)];
+}
+
+// ─── Search quick-picks: "for this moment" ───
+// A few searches that suit the hour, the listener's languages and their current session mood.
+const MOMENT_QUERIES = {
+  morning: ["morning fresh songs", "feel good songs", "devotional songs"],
+  afternoon: ["upbeat songs", "feel good songs", "dance songs"],
+  evening: ["romantic songs", "melody songs", "chill songs"],
+  night: ["late night chill songs", "calm songs", "sad songs"],
+};
+const MOOD_QUERY = { sad: "sad songs", romantic: "romantic songs", party: "party songs", energetic: "workout songs", chill: "chill songs", calm: "calm songs", happy: "happy songs", devotional: "devotional songs" };
+
+export function momentPicks(date = new Date()) {
+  const hour = timeOfDay(date).part;
+  const languages = regionalLanguages(getProfile());
+  const lang = languages[0] || "";
+  const titleCase = (t) => t.replace(/\b\w/g, (c) => c.toUpperCase());
+  const session = getSession();
+  const picks = [];
+  // Their current mood first: the strongest mood in this session's vector
+  const sessionMood = session && Object.entries(session).filter(([k, v]) => k.startsWith("mood:") && v > 0.2).sort((a, b) => b[1] - a[1])[0];
+  if (sessionMood && MOOD_QUERY[sessionMood[0].slice(5)]) {
+    const q = `${lang} ${MOOD_QUERY[sessionMood[0].slice(5)]}`.trim();
+    picks.push({ label: `More ${sessionMood[0].slice(5)}`, query: q });
+  }
+  for (const base of MOMENT_QUERIES[hour]) {
+    const q = `${lang} ${base}`.trim();
+    if (!picks.some((p) => p.query === q)) picks.push({ label: titleCase(q), query: q });
+  }
+  // Their favourite artist, if they have one
+  const artist = Object.entries(getProfile() || {}).filter(([k, v]) => k.startsWith("artist:") && v > 0.1).sort((a, b) => b[1] - a[1])[0];
+  if (artist) picks.push({ label: titleCase(artist[0].slice(7)), query: artist[0].slice(7) });
+  return picks.slice(0, 5);
 }

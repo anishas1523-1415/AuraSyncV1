@@ -5,6 +5,7 @@
 //   profile = sum(positive features * weight * decay) - gamma * sum(negative features * decay)
 import { trackFeatures } from "./classify.js";
 import { cosine } from "./rank.js";
+import { pushSessionEvent, sessionVector, intentVector } from "./context.js";
 
 const KEY = "aurasynq_taste";
 const MAX_TRACKS = 400;
@@ -61,6 +62,9 @@ export function recordFeedback(track, kind) {
     ids.sort((a, b) => s.tracks[a].at - s.tracks[b].at).slice(0, ids.length - MAX_TRACKS).forEach((id) => delete s.tracks[id]);
   }
 
+  // The listening session: what they are into right now
+  pushSessionEvent(s, { id: track.id, f: entry.f, w: WEIGHTS[kind], at: Date.now() });
+
   // Online evaluation of Aura Radio: precision = share of radio songs played through
   if (track.source === "radio" && (kind === "complete" || kind === "skip")) {
     s.radio[kind === "complete" ? "played" : "skipped"] += 1;
@@ -95,6 +99,20 @@ export function getProfile() {
   if (!norm) return null;
   profileCache = Object.fromEntries(Object.entries(vector).map(([k, v]) => [k, v / norm]));
   return profileCache;
+}
+
+// The current session's vector (last songs heard, newest first in weight), or null
+export function getSession() {
+  if (typeof window === "undefined") return null;
+  return sessionVector(load());
+}
+
+// Long-term taste + this session + time of day: what suits the listener right now
+export function getIntent() {
+  if (typeof window === "undefined") return null;
+  const profile = getProfile();
+  const session = getSession();
+  return profile || session ? intentVector(profile, session) : null;
 }
 
 // How well a song fits the listener (-1..1)

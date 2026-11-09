@@ -3,7 +3,7 @@
 // Needs no PO token, so it doesn't wait for BotGuard.
 import { Innertube, UniversalCache } from "youtubei-web/web";
 import { nativeFetch } from "./nativeHttp";
-import { musicRadio, searchMusicSongs } from "../musicTracks";
+import { musicRadio, searchMusicSongs, musicSuggestions } from "../musicTracks";
 import { createSearch } from "../ir/search";
 import { languageTrending, trendingNow } from "../ir/charts";
 
@@ -38,6 +38,10 @@ export async function searchSongs(query, { profile = null, trending = null, ligh
 
 export async function relatedSongs(videoId) {
   return musicRadio(await getClient(), videoId);
+}
+
+export async function suggestQueries(query) {
+  return musicSuggestions(await getClient(), query);
 }
 
 // Official YouTube Music charts: "tamil" (one language) or "now" (the country, leaning toward
