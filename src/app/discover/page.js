@@ -9,6 +9,7 @@ import { useReconnect } from "@/lib/network";
 import { mixSongs, forYouSongs } from "@/lib/catalog";
 import { DISCOVER_SEEDS } from "@/app/category/[slug]/categories";
 import SyncButton from "@/components/SyncButton";
+import { queueFrom } from "@/lib/ir/recommend";
 
 // Every third card follows the listener's own taste (radio of songs they played or liked)
 const weave = (mix, personal) => {
@@ -100,7 +101,7 @@ export default function Discover() {
             </div>
 
             {/* Centered Album Art */}
-            <div className={styles.albumArt} onClick={() => isActive ? togglePlay() : playTrack(track, tracks)}>
+            <div className={styles.albumArt} onClick={() => isActive ? togglePlay() : playTrack(track, queueFrom(track, tracks))}>
               <img
                 src={track.cover}
                 alt={track.title}
@@ -140,7 +141,7 @@ export default function Discover() {
 
               <button
                 className={styles.actionBtn}
-                onClick={() => isActive ? togglePlay() : playTrack(track, tracks)}
+                onClick={() => isActive ? togglePlay() : playTrack(track, queueFrom(track, tracks))}
               >
                 {isActive && isPlaying
                   ? <Pause size={28} weight="fill" />

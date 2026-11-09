@@ -29,10 +29,10 @@ function getClient() {
 // Full relevance search (query understanding, film albums, artists, ranking, personal taste)
 const engine = createSearch(getClient);
 
-export async function searchSongs(query, { profile = null, light = false } = {}) {
+export async function searchSongs(query, { profile = null, trending = null, light = false } = {}) {
   // `light`: plain song search for background mixes, which don't need the extra lookups
   if (light) return searchMusicSongs(await getClient(), query);
-  return engine.search(query, { profile });
+  return engine.search(query, { profile, trending });
 }
 
 export async function relatedSongs(videoId) {

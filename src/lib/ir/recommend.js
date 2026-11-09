@@ -3,13 +3,15 @@
 import { trackFeatures } from "./classify.js";
 import { cosine, diversify, collapseDuplicates } from "./rank.js";
 import { getProfile, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
+import { regionalLanguages, regionalScore, trendScore, continuityScore } from "./signals.js";
 
 // ─── Aura Radio: songs after the current one ───
 // Candidates come from YouTube Music's radio for the current song (its collaborative filtering);
 // each is re-scored by similarity to what's playing now (session context) and to the listener's
 // taste, rejected songs are dropped, and runs of one artist are broken up (MMR).
-export function rankRadio(candidates, { current, exclude = new Set(), count = 10 }) {
+export function rankRadio(candidates, { current, exclude = new Set(), count = 10, trending = null }) {
   const profile = getProfile();
+  const languages = regionalLanguages(profile);
   const context = current ? trackFeatures(current) : {};
   const scored = candidates
     .filter((t) => t?.id && !exclude.has(t.id) && !isRejected(t))
@@ -17,7 +19,10 @@ export function rankRadio(candidates, { current, exclude = new Set(), count = 10
       const f = trackFeatures(track);
       // YouTube Music's own order still counts; songs from the second (taste) list start lower
       const base = (track.fromAnchor ? 0.7 : 1) / (1 + (track.rankInList ?? rank) * 0.15);
-      const s = 0.3 * base + 0.3 * cosine(context, f) + (profile ? 0.5 * cosine(profile, f) : 0);
+      // Relevance to the song playing (features + mood/language continuity) comes first, then the
+      // listener's taste, their region's language and what's trending
+      const s = 0.3 * base + 0.35 * cosine(context, f) + continuityScore(current, track) +
+        (profile ? 0.4 * cosine(profile, f) : 0) + 0.5 * regionalScore(track, languages) + trendScore(track, trending);
       return { track, score: s };
     })
     .sort((a, b) => b.score - a.score);
@@ -93,11 +98,13 @@ export async function forYou(getRelated, { count = 25, recent = new Set(), fallb
 }
 
 // ─── Mood/category mixes: relevant first, personal second, a little variety ───
-export function personalize(tracks, { count = 25 } = {}) {
+export function personalize(tracks, { count = 25, trending = null } = {}) {
   const profile = getProfile();
+  const languages = regionalLanguages(profile);
   const scored = tracks.map((track, rank) => ({
     track,
-    score: 0.55 / (1 + rank * 0.08) + (profile ? 0.45 * cosine(profile, trackFeatures(track)) : 0) + Math.random() * 0.08,
+    score: 0.5 / (1 + rank * 0.08) + (profile ? 0.4 * cosine(profile, trackFeatures(track)) : 0) +
+      regionalScore(track, languages) + trendScore(track, trending) + Math.random() * 0.06,
   })).filter(({ track }) => !isRejected(track)).sort((a, b) => b.score - a.score);
   return diversify(scored, { lambda: 0.8, count, features: trackFeatures }).map((p) => p.track);
 }
@@ -124,4 +131,20 @@ function shuffleInPlace(list) {
     [list[i], list[j]] = [list[j], list[i]];
   }
   return list;
+}
+
+// Queue for a song tapped in a list: that song first, then the rest of the list ordered by how
+// close each is to it (features, mood and language continuity), the list's own order breaking ties
+export function queueFrom(track, list = []) {
+  if (!track) return list;
+  const context = trackFeatures(track);
+  const rest = list
+    .filter((t) => t?.id && t.id !== track.id)
+    .map((t, rank) => ({
+      t,
+      score: 0.6 * cosine(context, trackFeatures(t)) + continuityScore(track, t) + 0.25 / (1 + rank * 0.1),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ t }) => t);
+  return [track, ...rest];
 }

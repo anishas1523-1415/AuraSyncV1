@@ -5,6 +5,7 @@ import { analyzeQuery } from "./query.js";
 import { normalize, tokenize, jaccard, termMatch, parseTitle } from "./text.js";
 import { bm25Scores, coverage, reciprocalRankFusion, qualityPrior, collapseDuplicates, cosine } from "./rank.js";
 import { classifyTrack, trackFeatures } from "./classify.js";
+import { regionalLanguages, regionalScore, trendScore } from "./signals.js";
 import { songToTrack, isPlayableSong, musicRadio } from "../musicTracks.js";
 
 const RESULTS = 30;
@@ -81,7 +82,8 @@ export function createSearch(getClient) {
         cover: t.cover?.includes("hqdefault") && cover ? cover : t.cover,
         album: albumTitle,
       }))
-      .filter(isPlayableSong);
+      // Album rows are songs by definition; some layouts omit their length, so don't require it
+      .filter((t) => !t.duration || isPlayableSong(t));
   }
 
   // "anirudh" / "sid sriram songs" -> that artist's top songs, if the name really is an artist
@@ -108,7 +110,7 @@ export function createSearch(getClient) {
     }
   }
 
-  async function search(raw, { profile = null } = {}) {
+  async function search(raw, { profile = null, trending = null } = {}) {
     const q = analyzeQuery(raw);
     if (!q.text) return [];
     const safe = (p) => p.catch(() => null);
@@ -137,7 +139,7 @@ export function createSearch(getClient) {
     if (artist?.tracks?.length) lists.push({ tracks: artist.tracks, weight: 1.2 });
     expanded.forEach((tracks) => tracks?.length && lists.push({ tracks, weight: 0.7 }));
 
-    let ranked = score([q], reciprocalRankFusion(lists), { profile, album, artist });
+    let ranked = score([q], reciprocalRankFusion(lists), { profile, album, artist, trending });
 
     // Weak matches: try YouTube Music's spelling suggestion ("vathi comming" -> "vaathi coming")
     if (q.intent !== "mood" && (!ranked.length || ranked[0].cov < 0.6)) {
@@ -147,7 +149,7 @@ export function createSearch(getClient) {
         if (extra?.length) {
           lists.push({ tracks: extra, weight: 1.3 });
           // Score against both spellings, so neither the typed nor the corrected words lose out
-          ranked = score([q, analyzeQuery(corrected)], reciprocalRankFusion(lists), { profile, album, artist });
+          ranked = score([q, analyzeQuery(corrected)], reciprocalRankFusion(lists), { profile, album, artist, trending });
         }
       }
     }
@@ -174,8 +176,9 @@ export function createSearch(getClient) {
 
   // Final relevance score for every fused candidate (`queries`: the typed query and, if any, its
   // spelling correction; each signal takes the better of the two)
-  function score(queries, fused, { profile, album, artist }) {
+  function score(queries, fused, { profile, album, artist, trending }) {
     const q = queries[0];
+    const regional = regionalLanguages(profile);
     const tracks = fused.map((f) => f.track);
     const bm25 = tracks.map((_, i) => Math.max(...queries.map((v) => bm25ByQuery(v, tracks)[i])));
     const maxBm25 = Math.max(1e-9, ...bm25);
@@ -201,6 +204,9 @@ export function createSearch(getClient) {
       }
       if (q.intent === "mood") boosted = true; // every mood result is "about" the request
       if (profile) s += 0.15 * cosine(profile, trackFeatures(track));
+      // No language asked: lean toward the listener's region and what's trending (tie-breakers)
+      if (!q.languages.length) s += 0.5 * regionalScore(track, regional);
+      s += trendScore(track, trending);
       return { track, score: s, cov, boosted };
     }).sort((a, b) => b.score - a.score);
   }

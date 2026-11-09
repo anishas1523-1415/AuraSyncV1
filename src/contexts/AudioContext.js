@@ -7,7 +7,7 @@ import {
 } from "@/lib/dbSync";
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
-import { relatedSongs, warmCatalog } from "@/lib/catalog";
+import { relatedSongs, warmCatalog, trendingIds } from "@/lib/catalog";
 import { recordFeedback, seedFromLibrary } from "@/lib/ir/profile";
 import { rankRadio, radioAnchor, mergeRadio } from "@/lib/ir/recommend";
 import { getYouTubeElement } from "@/lib/youtubeEmbed";
@@ -958,7 +958,7 @@ export function AudioProvider({ children }) {
       anchor ? relatedSongs(anchor).catch(() => []) : [],
     ]);
     const candidates = mergeRadio(related, anchorRelated).filter(t => !LONG_FORM.test(t.title || ""));
-    return rankRadio(candidates, { current: seed, exclude: known, count: RADIO_BATCH });
+    return rankRadio(candidates, { current: seed, exclude: known, count: RADIO_BATCH, trending: trendingIds() });
   };
 
   // Keep the vibe going: when the queue runs out, append similar tracks instead of looping
@@ -1569,6 +1569,13 @@ export function AudioProvider({ children }) {
       clearStallTimer();
       setIsBuffering(false);
       consecutiveErrorsRef.current = 0;
+      // Last song in the queue (e.g. one picked from Search): line up related songs now, so Up
+      // Next shows what follows and the next song can preload
+      const current = currentTrackRef.current;
+      const q = queueRef.current;
+      if (current && settingsRef.current.autoplay && q.length && q[q.length - 1].id === current.id) {
+        extendQueueWithRadio(current).then(() => warmNextTrack());
+      }
       warmNextTrack();
     },
     onPause: () => {

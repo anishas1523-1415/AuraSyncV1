@@ -38,13 +38,22 @@ const parsePlays = (item) => {
   return Math.round(parseFloat(m[1]) * ({ k: 1e3, m: 1e6, b: 1e9 }[(m[2] || "").toLowerCase()] || 1));
 };
 
+// Some layouts (album pages, mobile responses) only show the length as text ("3:11" / "1:02:33")
+const durationFromText = (item) => {
+  const text = (item.flex_columns || []).concat(item.fixed_columns || [])
+    .map((c) => c.title?.toString() || "").join(" • ");
+  const m = text.match(/(?:^|[\s•])(\d{1,2}:)?(\d{1,2}):(\d{2})(?=$|[\s•])/);
+  if (!m) return 0;
+  return (m[1] ? parseInt(m[1], 10) * 3600 : 0) + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+};
+
 // A song row from music.search(..., { type: "song" })
 export const songToTrack = (item) => item?.id && makeTrack({
   id: item.id,
   title: item.title,
   artist: joinArtists(item.artists) || item.author?.name || artistsFromSubtitle(item),
   cover: largeCover(item.thumbnails, item.id),
-  duration: item.duration?.seconds,
+  duration: item.duration?.seconds || durationFromText(item),
   album: item.album?.name,
   plays: parsePlays(item),
 });

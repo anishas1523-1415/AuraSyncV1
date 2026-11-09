@@ -5,6 +5,7 @@
 import { apiUrl, isMobileApp } from "@/lib/api";
 import { getProfile, seedFromLibrary } from "@/lib/ir/profile";
 import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
+import { regionalLanguages } from "@/lib/ir/signals";
 
 const CACHE_MS = 6 * 60 * 60 * 1000; // song searches change slowly; mixes stay varied anyway
 // Versioned: a new ranking must not serve lists ranked by an older one
@@ -71,9 +72,30 @@ async function cached(key, load, fresh) {
   }
 }
 
+// What's trending in the listener's region (their languages): ids of today's trending and
+// latest songs. Loaded in the background; rankings use whatever has arrived so far.
+let trending = null;
+let trendingAt = 0;
+export function trendingIds() {
+  if (typeof window === "undefined") return null;
+  if (!trendingAt || Date.now() - trendingAt > CACHE_MS) {
+    trendingAt = Date.now();
+    const langs = regionalLanguages(getProfile()).slice(0, 2);
+    const queries = langs.length
+      ? langs.flatMap((l) => [`trending ${l} songs`, `latest ${l} songs`])
+      : ["trending songs", "top songs this week"];
+    Promise.allSettled(queries.map((q) => seedSongs(q))).then((results) => {
+      const ids = new Set(results.flatMap((r) => (r.status === "fulfilled" ? r.value.map((t) => t.id) : [])));
+      if (ids.size) trending = ids;
+    });
+  }
+  return trending;
+}
+
 // Open the phone's YouTube Music connection early, so the first list loads sooner
 export function warmCatalog() {
   restoreCache();
+  setTimeout(trendingIds, 3000);
   loadMusic().then((music) => music?.warmUp?.()).catch(() => {});
 }
 
@@ -94,7 +116,7 @@ async function lookup(onDevice, serverParams) {
 // A listener's search: full relevance ranking, personalised by their taste profile
 export function searchSongs(query, { fresh = false } = {}) {
   const q = query.trim();
-  return cached(`search:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q, { profile: getProfile() }), { q }), fresh);
+  return cached(`search:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q, { profile: getProfile(), trending: trendingIds() }), { q }), fresh);
 }
 
 // Background searches behind mixes: plain song search, ranked by `personalize` afterwards
@@ -168,7 +190,7 @@ export async function mixSongs(key, seeds, { count = 25, seedsPerMix = 2, fresh 
   const chosen = pickSeeds(unused.length >= seedsPerMix ? unused : seeds, seedsPerMix);
   lastSeeds.set(key, chosen);
   const lists = await settledLists(chosen.map((seed) => seedSongs(seed, { fresh })));
-  return personalize(freshen(interleave(lists), count * 2), { count });
+  return personalize(freshen(interleave(lists), count * 2), { count, trending: trendingIds() });
 }
 
 // Personal mix: songs that the radios of the listener's favourites (from every side of their

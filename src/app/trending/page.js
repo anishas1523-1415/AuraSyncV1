@@ -6,6 +6,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { Play, Pause, ArrowLeft, MusicNotes } from "@phosphor-icons/react";
 import Link from "next/link";
 import SyncButton from "@/components/SyncButton";
+import { queueFrom } from "@/lib/ir/recommend";
 import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
 import { mixSongs } from "@/lib/catalog";
@@ -137,7 +138,7 @@ export default function Trending() {
   const handleTap = (track) => {
     if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
     if (currentTrack?.id === track.id) togglePlay();
-    else playTrack(track, tracks);
+    else playTrack(track, queueFrom(track, tracks));
   };
 
   const rows = Math.ceil(tracks.length / 2);

@@ -10,6 +10,7 @@ import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
 import { mixSongs, forYouSongs } from "@/lib/catalog";
 import { CATEGORY_MAP } from "./categories";
+import { queueFrom } from "@/lib/ir/recommend";
 
 export default function CategoryClient({ slug }) {
   const { playTrack, currentTrack, isPlaying, togglePlay, setContextPlaylist, prefetchTracks, playHistory, likedTracks } = useAudio();
@@ -75,7 +76,7 @@ export default function CategoryClient({ slug }) {
     if (currentTrack?.id === track.id) {
       togglePlay();
     } else {
-      playTrack(track, tracks);
+      playTrack(track, queueFrom(track, tracks));
     }
   };
 
