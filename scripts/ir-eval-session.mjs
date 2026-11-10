@@ -35,6 +35,9 @@ const load = async (tag) => {
   return { ...profile, ...recommend };
 };
 const { classifyTrack } = await import("../src/lib/ir/classify.js");
+// The app builds its mood index on start-up; do the same (unless --no-index or it doesn't exist)
+const moodIndex = process.argv.includes("--no-index") ? null : await import("../src/lib/ir/moods.js").catch(() => null);
+if (moodIndex) await moodIndex.ensureMoodIndex(yt, { languages: ["tamil", "english"] });
 
 const sessions = {
   a: { label: "calm melodies", songs: ["munbe vaa", "uyire en uyire", "kadhal oru aagayam", "nenjukkul peidhidum", "ennai thottu"] },
@@ -56,6 +59,9 @@ for (const [tag, { label, songs }] of Object.entries(sessions).filter(([t]) => t
   const moods = picks.map((t) => classifyTrack(t).mood);
   const c = moods.filter((x) => calm.has(x)).length;
   const l = moods.filter((x) => loud.has(x)).length;
-  console.log(`session "${label}": calm-ish ${c}, loud ${l} of 10 | ${picks.slice(0, 5).map((t) => t.title.slice(0, 20)).join(" / ")}`);
+  // The ceiling: how many candidates of each kind exist at all
+  const all = radio.map((t) => classifyTrack(t).mood);
+  const ceiling = `available: calm-ish ${all.filter((x) => calm.has(x)).length}, loud ${all.filter((x) => loud.has(x)).length}`;
+  console.log(`session "${label}": calm-ish ${c}, loud ${l} of 10 (${ceiling}) | ${picks.slice(0, 5).map((t) => t.title.slice(0, 20)).join(" / ")}`);
 }
 process.exit(0);

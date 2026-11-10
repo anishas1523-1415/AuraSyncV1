@@ -4,6 +4,7 @@
 // The training "documents" are small seed lexicons; artists act as strong language evidence.
 import { tokenize, normalize, parseTitle } from "./text.js";
 import { identifyLanguage, learnArtistLanguage } from "./language.js";
+import { indexedMood, learnedMood, onMoodIndexChange } from "./moods.js";
 
 const LANGUAGE_SEEDS = {
   tamil: `kadhal kaadhal kadhale nenjam nenje uyire uyir kanne kannamma penne ponnu poove vaa va
@@ -40,8 +41,9 @@ const LANGUAGE_SEEDS = {
 };
 
 const MOOD_SEEDS = {
-  romantic: `love kadhal kaadhal kadhale pyaar pyar ishq mohabbat dil uyire nenjam kanne anbe
-    anbu sanam jaana prema manasu pranayam romantic melody heart baby kiss forever`,
+  // ("dil", "heart" and "baby" are left out: they title party and sad songs as often as love songs)
+  romantic: `love kadhal kaadhal kadhale pyaar pyar ishq mohabbat uyire nenjam kanne anbe
+    anbu sanam jaana prema manasu pranayam romantic melody kiss forever`,
   sad: `sad cry tears broken alone lonely pain dard judaai tanha sogam kanneer heartbreak
     goodbye miss lost hurt sorrow vali valiye pirivu`,
   party: `kuthu mass dance party club naach dappankuthu thara local beat dj boom anthem
@@ -103,6 +105,8 @@ const SCRIPTS = [
 ];
 
 const cache = new Map();
+// New mood evidence (index built, moods learned): classify again from scratch
+onMoodIndexChange(() => cache.clear());
 
 export function classifyTrack(track) {
   if (!track?.id && !track?.title) return { language: null, mood: null };
@@ -127,12 +131,17 @@ export function classifyTrack(track) {
   } else {
     learnArtistLanguage(track.artist, language); // explicit marker or script: certain
   }
+  // Mood evidence, strongest first: YouTube Music's curated mood playlists (moods.js), the title's
+  // words, the version ("lofi", "slowed"), then moods learned from mood requests
   const moodResult = naiveBayes(moodModel, tokenize(`${parsed.song} ${parsed.film}`));
-  let mood = moodResult.label && moodResult.confidence >= 0.5 ? moodResult.label : null;
-  if (!mood && parsed.variants.includes("lofi")) mood = "chill";
-  if (!mood && parsed.variants.includes("slowed")) mood = "chill";
+  const titleMood = moodResult.label && moodResult.confidence >= 0.5 ? moodResult.label : null;
+  const variantMood = parsed.variants.includes("lofi") || parsed.variants.includes("slowed") ? "chill" : null;
+  const curated = indexedMood(track);
+  const fromRequests = learnedMood(track);
+  const mood = curated || titleMood || variantMood || fromRequests || null;
+  const moodSource = curated ? "index" : titleMood ? "title" : variantMood ? "variant" : fromRequests ? "learned" : null;
 
-  const result = { language, mood, film: parsed.film || null, confidence };
+  const result = { language, mood, moodSource, film: parsed.film || null, confidence };
   if (cache.size > 2000) cache.clear();
   cache.set(key, result);
   return result;

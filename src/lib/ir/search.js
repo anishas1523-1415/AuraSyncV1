@@ -7,6 +7,7 @@ import { bm25Scores, coverage, reciprocalRankFusion, qualityPrior, collapseDupli
 import { classifyTrack, classifyList, trackFeatures } from "./classify.js";
 import { regionalLanguages, regionalScore, trendScore } from "./signals.js";
 import { songToTrack, isPlayableSong, musicRadio } from "../musicTracks.js";
+import { learnMoods } from "./moods.js";
 
 const RESULTS = 30;
 
@@ -181,6 +182,9 @@ export function createSearch(getClient) {
     }
 
     ranked = collapseDuplicates(ranked);
+
+    // An unambiguous mood request ("sad tamil songs") is evidence for the mood of what it returns
+    if (q.intent === "mood" && q.moods.length === 1) learnMoods(ranked.slice(0, 20).map((r) => r.track), q.moods[0]);
 
     // Precision: for a specific song, drop results that share nothing with the query and fill the
     // tail with songs like the top hit instead (pseudo-relevance feedback: assume it's relevant)

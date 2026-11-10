@@ -6,6 +6,10 @@ import { nativeFetch } from "./nativeHttp";
 import { musicRadio, searchMusicSongs, musicSuggestions } from "../musicTracks";
 import { createSearch } from "../ir/search";
 import { languageTrending, trendingNow } from "../ir/charts";
+import { analyzeQuery } from "../ir/query";
+import { ensureMoodIndex, learnMoods } from "../ir/moods";
+import { getProfile } from "../ir/profile";
+import { regionalLanguages } from "../ir/signals";
 
 let clientPromise = null;
 
@@ -32,7 +36,13 @@ const engine = createSearch(getClient);
 
 export async function searchSongs(query, { profile = null, trending = null, light = false } = {}) {
   // `light`: plain song search for background mixes, which don't need the extra lookups
-  if (light) return searchMusicSongs(await getClient(), query);
+  if (light) {
+    const tracks = await searchMusicSongs(await getClient(), query);
+    // A mix seeded by one mood ("tamil sad songs") also teaches that mood
+    const q = analyzeQuery(query);
+    if (q.intent === "mood" && q.moods.length === 1) learnMoods(tracks.slice(0, 20), q.moods[0]);
+    return tracks;
+  }
   return engine.search(query, { profile, trending });
 }
 
@@ -54,6 +64,17 @@ export async function chartSongs(kind, { country = "IN", languages = [], count =
 // USB-debug hook: await window.__auraSearch.filmAlbum("leo", { languages: [] })
 if (typeof window !== "undefined") window.__auraSearch = { ...engine, chartSongs };
 
+// The mood index (YouTube Music's curated mood playlists in the listener's languages) is refreshed
+// every few days, a little after start-up so it doesn't compete with the first screen's lists
+let moodIndexStarted = false;
 export function warmUp() {
-  getClient().catch(() => {});
+  getClient()
+    .then((yt) => {
+      if (moodIndexStarted) return;
+      moodIndexStarted = true;
+      setTimeout(() => {
+        ensureMoodIndex(yt, { languages: [...new Set([...regionalLanguages(getProfile()), "english"])] });
+      }, 8000);
+    })
+    .catch(() => {});
 }

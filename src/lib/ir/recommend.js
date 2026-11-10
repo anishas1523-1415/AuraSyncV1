@@ -4,7 +4,10 @@ import { trackFeatures, classifyList } from "./classify.js";
 import { cosine, diversify, collapseDuplicates } from "./rank.js";
 import { getProfile, getIntent, getSession, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
 import { timeOfDay } from "./context.js";
-import { regionalLanguages, regionalScore, trendScore, continuityScore } from "./signals.js";
+import { regionalLanguages, regionalScore, trendScore, continuityScore, moodAffinity } from "./signals.js";
+
+// How strongly the listening session's mood steers what plays next (see moodAffinity)
+const MOOD_WEIGHT = 0.3;
 
 // ─── Aura Radio: songs after the current one ───
 // Candidates come from YouTube Music's radio for the current song (its collaborative filtering);
@@ -13,6 +16,7 @@ import { regionalLanguages, regionalScore, trendScore, continuityScore } from ".
 export function rankRadio(candidates, { current, exclude = new Set(), count = 10, trending = null }) {
   const profile = getProfile();
   const intent = getIntent(); // taste + this session's mood + time of day
+  const session = getSession(); // what they've played in the last few hours
   const languages = regionalLanguages(profile);
   const context = current ? trackFeatures(current) : {};
   classifyList(current ? [current, ...candidates] : candidates); // neighbour vote fills unknown languages
@@ -25,7 +29,8 @@ export function rankRadio(candidates, { current, exclude = new Set(), count = 10
       // Relevance to the song playing (features + mood/language continuity) comes first, then the
       // listener's taste, their region's language and what's trending
       const s = 0.3 * base + 0.35 * cosine(context, f) + continuityScore(current, track) +
-        (intent ? 0.45 * cosine(intent, f) : 0) + 0.5 * regionalScore(track, languages) + trendScore(track, trending);
+        (intent ? 0.45 * cosine(intent, f) : 0) + MOOD_WEIGHT * moodAffinity(session, track) +
+        0.5 * regionalScore(track, languages) + trendScore(track, trending);
       return { track, score: s };
     })
     .sort((a, b) => b.score - a.score);
@@ -161,13 +166,15 @@ export function rerankUpcoming(upcoming, { current }) {
   if (upcoming.length < 3) return upcoming;
   const [next, ...rest] = upcoming;
   const intent = getIntent();
+  const session = getSession();
   const context = current ? trackFeatures(current) : {};
   const scored = rest
     .filter((t) => !isRejected(t))
     .map((track, i) => ({
       track,
       score: 0.35 / (1 + i * 0.1) + 0.3 * cosine(context, trackFeatures(track)) +
-        continuityScore(current, track) + (intent ? 0.45 * cosine(intent, trackFeatures(track)) : 0),
+        continuityScore(current, track) + (intent ? 0.45 * cosine(intent, trackFeatures(track)) : 0) +
+        MOOD_WEIGHT * moodAffinity(session, track),
     }))
     .sort((a, b) => b.score - a.score);
   return [next, ...diversify(scored, { lambda: 0.75, count: scored.length, features: trackFeatures }).map((p) => p.track)];

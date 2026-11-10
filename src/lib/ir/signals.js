@@ -47,6 +47,23 @@ const CLASH = {
   chill: ["party"],
 };
 
+// How well a song's mood fits the moods of a vector (the listening session), -0.5..1:
+// the share of the session's mood weight on the song's mood, minus 0.5 when the session is mostly
+// in a mood that clashes with it. 0 when either has no mood (most songs say nothing: no penalty).
+// Mood is one feature among artists, language and film in cosine similarity, where a session of five
+// different artists drowns it; this term lets the session's mood steer on its own.
+export function moodAffinity(vector, track) {
+  if (!vector) return 0;
+  const mood = classifyTrack(track).mood;
+  if (!mood) return 0;
+  const moods = Object.entries(vector).filter(([k, v]) => k.startsWith("mood:") && v > 0);
+  const total = moods.reduce((n, [, v]) => n + v, 0);
+  if (!total) return 0;
+  const share = Math.max(0, vector[`mood:${mood}`] || 0) / total;
+  const clashing = moods.some(([k, v]) => v / total > 0.5 && CLASH[k.slice(5)]?.includes(mood));
+  return share - (clashing ? 0.5 : 0);
+}
+
 // Same mood +0.1, clashing mood -0.15, unknown 0; same language +0.1, different -0.15
 export function continuityScore(current, track) {
   if (!current) return 0;

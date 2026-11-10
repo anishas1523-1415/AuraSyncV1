@@ -6,6 +6,7 @@ import { supabase, isSupabaseActive } from '@/lib/supabase';
 import { musicRadio, musicSuggestions } from '@/lib/musicTracks';
 import { createSearch } from '@/lib/ir/search';
 import { languageTrending, trendingNow } from '@/lib/ir/charts';
+import { ensureMoodIndex } from '@/lib/ir/moods';
 
 const ytSearch = require('youtube-search-api');
 
@@ -26,6 +27,17 @@ const withMusicTimeout = (promise, ms = MUSIC_TIMEOUT_MS) => Promise.race([
 ]);
 // Relevance search: query understanding, film soundtracks, artists, BM25 + popularity ranking
 const searchEngine = createSearch(getMusicClient);
+
+// Mood index for this server instance (YouTube Music's curated mood playlists), built in the
+// background after the first request and refreshed every few days; searches never wait for it
+let moodIndexKicked = 0;
+const kickMoodIndex = () => {
+  if (Date.now() - moodIndexKicked < 60 * 60 * 1000) return;
+  moodIndexKicked = Date.now();
+  getMusicClient()
+    .then((yt) => ensureMoodIndex(yt, { languages: ['tamil', 'hindi', 'telugu', 'malayalam', 'kannada', 'english'] }))
+    .catch(() => {});
+};
 
 // Search-as-you-type, Discover, categories and Blend all share this budget; cached queries are free
 const RATE_LIMIT_PER_MINUTE = 30;
@@ -235,6 +247,7 @@ async function findTracks(query, relatedTo) {
 }
 
 export async function GET(request) {
+  kickMoodIndex();
   const ip = getClientIp(request);
   const now = Date.now();
 

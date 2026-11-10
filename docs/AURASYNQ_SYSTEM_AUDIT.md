@@ -237,7 +237,7 @@ YouTube Music radio returns 49 songs from both the server client (`youtubei.js`)
 | D1c | Medium | Search latency ≈3× baseline (median ≈1.7 s vs ≈0.55 s) from upstream fan-out | verified |
 | D2 | High | Language ID held-out accuracy 0.81 (0.92 with neighbours). Dubbed and pan-India titles and English-titled regional songs fail; Kannada F1 0.67 | verified |
 | D3 | High | Candidates come only from YouTube Music radio/search, so popularity and YouTube's own CF dominate. No content-based or own-catalogue candidates | verified (design); impact hypothesis |
-| D4 | High | Mood is inferred from title words only (seed lexicon NB), so most songs get no mood. Measured: session mood steering gives 1/10 calm and 0/10 loud | verified |
+| D4 | High | Mood is inferred from title words only (seed lexicon NB), so most songs get no mood. Measured: session mood steering gives 1/10 calm and 0/10 loud | **improved 2026-11-10** (see §9): steering now 6/10 and 10/10 where candidates allow; mood coverage still 38% of labelled songs |
 | D5 | Medium | Duplicate and inconsistent mood/genre classifier in `activity.js` | verified |
 | D6 | Medium | Mid-song exits (between the skip cutoff and 70%) count as "play" (+0.4), never negative, so a disliked song heard for 40 s is learned as a weak positive | verified (logic) |
 | D7 | Medium | Fixed ranking weights; no learning from logged skips/completes | verified |
@@ -310,6 +310,47 @@ Of the 31 existing benchmark queries, only two parse differently:
 - "Vijay" in a request is assumed to mean the singer; there's no explicit check between the actor and other people named Vijay.
 - Era is used only to widen retrieval, not as a filter, because tracks carry no release year.
 - `npm run lint` is broken independently of this change: `eslint.config.mjs` imports `eslint/config`, which ESLint 8 doesn't export.
+
+### 2026-11-10: song moods (D4)
+
+**Scope.** Search, classification and ranking logic only. No UI or API contract changes.
+
+**What changed:**
+
+1. **Mood index (new `src/lib/ir/moods.js`).** Songs are labelled from YouTube Music's own editorial mood playlists: "Kollywood Romance Essentials", "Bollywood Melancholy", "Tollywood Dance Hitlist", "Workout"…
+   - **Sources:** the "Moods & moments" categories plus the listener's language pages.
+   - **Which playlists count:** only official playlists (ids starting `RDCL`). A playlist's mood comes from its title. Only the narrow categories (Romance, Sad, Party, Workout, Devotional) lend their mood to playlists whose title names none, because "Iconic Kollywood Hits" sits under Feel good but isn't "happy".
+   - **Budget:** 96 playlists, spread round-robin over (language, mood) pairs, with 20 kept for global playlists for English listeners.
+   - **Votes:** a song on several playlists takes the majority mood. Specific moods (romantic, sad, party, energetic, devotional) outweigh broad ones (happy, chill, calm) 1 : 0.6.
+   - **Lookup:** by video id, or by title + artist so other uploads match. Remix, lo-fi and other edited versions are matched by id only, so a remix in a workout list doesn't make the original "energetic".
+   - **Caching:** on the device for 3 days, about 4,500 songs. It's built about 8 s after app start-up and takes ~10 s in the background. The server builds its own copy after its first request; searches never wait for it.
+2. **Learned moods.** Songs returned for an unambiguous mood request ("sad tamil songs"), or for a mood-seeded mix on the phone, are remembered as weak evidence for that mood.
+3. **Evidence order in `classifyTrack`:** index > title words > version (lofi/slowed) > learned. `moodSource` records which one decided.
+4. **Title words.** "dil", "heart" and "baby" were removed from the romantic list. They gave "Rowdy Baby", "Badtameez Dil" and "Channa Mereya" (film "Ae **Dil** Hai Mushkil") the wrong mood.
+5. **Mood steering in ranking.** A new `moodAffinity` term (weight 0.3) in radio ranking (`rankRadio`) and the live queue (`rerankUpcoming`) uses this session's mood directly. Before, mood was one entry in a cosine over artists, language and film, where five different session artists drowned it.
+
+**Measured results (live YouTube Music, 2026-11-10):**
+
+| Check | Before | After |
+|---|---|---|
+| `scripts/mood-eval.mjs`, labelled songs (n=50): coverage | 0.16 | **0.38** |
+| — precision (share of given moods that are right) | 0.50 | **0.74** |
+| — accuracy | 0.08 | **0.28** |
+| — radio candidates with a mood (6 seeds, n=294) | 0.09 | **0.30** |
+| `ir-eval-session.mjs`, Kanmani Anbodu radio, calm session | 1/10 calm | **6/10** (10 available) |
+| — same radio, energetic session | 0/10 loud | **2/10** (2 available) |
+| — Vaathi Coming radio, energetic session | — | **10/10** (25 available) |
+| `ir-eval-queue.mjs`: skipped artist pushed down | 2 of 3 seeds | 2 of 3 seeds (Arijit 11 → 15) |
+| `ir-eval-requests.mjs` mean P@10 | 0.99 | 0.98 (live variance) |
+| `ir-eval.mjs` title benchmark | all 1.00 | all 1.00 |
+
+**Limits:**
+
+- **Coverage of older songs is low.** Many Tamil and Telugu classics ("Munbe Vaa", "Samajavaragamana") are on no editorial mood playlist; 62% of labelled songs still get no mood.
+- **Remaining errors are borderline.** Most mix up neighbouring moods: romantic vs happy, party vs energetic.
+- **Benchmark labels are unreviewed.** `scripts/mood-benchmark.json` was hand-labelled from general knowledge and should be checked by the owner.
+- **Website gets nothing yet.** Website listeners rank radio in the browser, which has no YouTube client, so they don't get the index. Serving it would need a new API endpoint, which requires approval.
+- **Storage use.** The index takes about 250 KB of the device's local storage.
 
 ## 8. Constraints for later phases
 
