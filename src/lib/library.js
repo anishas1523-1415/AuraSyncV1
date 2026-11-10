@@ -101,7 +101,9 @@ export function mergePlaylists(a, b) {
 
 export function mergeHistory(a, b, limit = 50) {
   const clearedAt = Math.max(ts(a?.clearedAt), ts(b?.clearedAt));
-  const items = pickNewest([a?.items, b?.items], "playedAt").filter((song) => ts(song.playedAt) > clearedAt);
+  // Entries saved before timestamps existed (time 0) are kept unless history was explicitly cleared
+  // later; "newer than the last clear" is only a test once something has actually been cleared
+  const items = pickNewest([a?.items, b?.items], "playedAt").filter((song) => clearedAt === 0 || ts(song.playedAt) > clearedAt);
   const newestFirst = items
     .map((item, index) => ({ item, index }))
     .sort((x, y) => ts(y.item.playedAt) - ts(x.item.playedAt) || x.index - y.index)

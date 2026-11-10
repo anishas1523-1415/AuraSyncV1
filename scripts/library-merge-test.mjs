@@ -84,6 +84,11 @@ test("history from two devices interleaves, newest first, capped", () => {
   const merged = mergeHistory({ items: [played("a", 10), played("c", 30)], clearedAt: 0 }, { items: [played("b", 20)], clearedAt: 0 }, 2);
   assert.equal(ids(merged.items), "c,b");
 });
+test("history saved before timestamps existed is NOT dropped by a merge (it used to be)", () => {
+  const legacy = { items: [{ id: "old1" }, { id: "old2" }], clearedAt: 0 };
+  assert.equal(ids(mergeHistory(legacy, { items: [], clearedAt: 0 }).items), "old1,old2");
+  assert.equal(ids(mergeHistory(legacy, null).items), "old1,old2");
+});
 test("clearing history on one device is not undone by the other", () => {
   const cleared = { items: [], clearedAt: T + 100 };
   const old = { items: [played("a", 10), played("legacy", 0)], clearedAt: 0 };

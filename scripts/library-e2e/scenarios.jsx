@@ -248,6 +248,7 @@ export async function run() {
     assert.equal(phone.lib.customPlaylists[0].name, "Old list");
     assert.equal(phone.lib.lifetime.seconds, 1800, "minutes preserved exactly, not doubled");
     assert.equal(phone.lib.lifetime.plays, 40);
+    assert.equal(ids(phone.lib.playHistory), "oh", "recent history survives the first sync");
     await phone.act((l) => l.toggleLike(song("old1"))); // unlike a migrated song
     await phone.sync(); await phone.close();
     const web = await openDevice("web", U1);
