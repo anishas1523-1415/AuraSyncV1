@@ -1,74 +1,90 @@
 import { db } from "./firebase";
-import { doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, runTransaction, setDoc, writeBatch } from "firebase/firestore";
+import { syncBlob as syncBlobWith, readCloud as readCloudWith, deleteCloudLibrary as deleteCloudWith, libPath } from "./cloudBlob";
 
-// Each listener's library is one Firestore document, users/{uid}; the security rules only let
-// that signed-in person read or write it. Every call resolves to true when it reached the cloud.
+// A listener's library lives under users/{uid}/lib/{name}: one document per kind of data (liked,
+// playlists, history, activity, taste, settings). The security rules let only that signed-in
+// person read or write it.
+//
+// Saving is an atomic READ-MERGE-WRITE inside a Firestore transaction: the cloud copy is read, merged
+// with this device's copy using the rules in library.js, and written back in one step. Two devices
+// saving at the same moment cannot overwrite each other (the transaction retries), and a save that
+// cannot reach the server fails cleanly (the caller keeps the data and retries) instead of hanging.
+//
+// A kind of data is stored as a JSON string; strings over ~240k characters are split across several
+// documents (name, name~1, name~2...) so Firestore's 1 MB document limit can never stop a save.
 
-// Firestore rejects `undefined` field values; a JSON round-trip drops them
-const sanitize = (value) => JSON.parse(JSON.stringify(value ?? null));
+// The thin interface the logic needs from Firestore (a fake one is used in tests)
+export function firestoreStore() {
+  const ref = (path) => doc(db, ...path);
+  return {
+    available: () => !!db,
+    runTransaction: (fn) => runTransaction(db, (tx) => fn({
+      get: async (path) => { const s = await tx.get(ref(path)); return s.exists() ? s.data() : null; },
+      set: (path, data) => tx.set(ref(path), data),
+      delete: (path) => tx.delete(ref(path)),
+    })),
+    get: async (path) => { const s = await getDoc(ref(path)); return s.exists() ? s.data() : null; },
+    list: async (path) => (await getDocs(collection(db, ...path))).docs.map((d) => d.id),
+    deleteMany: async (paths) => {
+      for (let i = 0; i < paths.length; i += 400) {
+        const batch = writeBatch(db);
+        paths.slice(i, i + 400).forEach((p) => batch.delete(ref(p)));
+        await batch.commit();
+      }
+    },
+  };
+}
 
-const save = async (userId, fields, what) => {
+const withTimeout = (promise, ms = 20000) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+]);
+
+const store = firestoreStore();
+
+export const syncBlob = (userId, name, local, merge) => syncBlobWith(store, userId, name, local, merge);
+export const readCloud = (userId, name) => readCloudWith(store, userId, name);
+export const deleteCloudLibrary = (userId) => deleteCloudWith(store, userId);
+
+export async function writeMarker(userId, name, data) {
   if (!userId || !db) return false;
   try {
-    await setDoc(doc(db, "users", userId), fields, { merge: true });
+    await withTimeout(setDoc(doc(db, ...libPath(userId, name)), { ...data, at: Date.now() }));
     return true;
   } catch (err) {
-    console.warn(`AuraSynq: couldn't sync ${what} to the cloud`, err);
     return false;
   }
-};
+}
 
-export const syncHistoryToCloud = (history, userId) =>
-  save(userId, { playHistory: sanitize(history) }, "history");
-
-// `updatedAt` lets other devices tell newer edits (incl. unlikes) apart
-export const syncLikedToCloud = (likedTracks, userId, updatedAt = Date.now()) =>
-  save(userId, { likedTracks: sanitize(likedTracks), likedUpdatedAt: updatedAt }, "liked songs");
-
-export const syncPlaylistsToCloud = (playlists, userId, updatedAt = Date.now()) =>
-  save(userId, { customPlaylists: sanitize(playlists), playlistsUpdatedAt: updatedAt }, "playlists");
-
-export const syncStatsToCloud = (stats, userId) =>
-  save(userId, { listenStats: sanitize(stats) }, "listening stats");
-
-export const syncProfileToCloud = (user) => {
-  if (!user?.id) return Promise.resolve(false);
-  return save(user.id, {
-    name: user.fullName || "Aura User",
-    avatarUrl: user.imageUrl || null,
-    email: user.email || null,
-  }, "profile");
-};
-
-// Restore the library saved from other devices.
-// Returns null when the cloud is unreachable, so callers never overwrite cloud data blindly.
-export const loadLibraryFromCloud = async (userId) => {
-  if (!userId || !db) return null;
+// The single-document library (before per-kind documents), read once to migrate it
+export async function loadLegacyLibrary(userId) {
+  if (!userId || !store.available()) return null;
   try {
-    const snapshot = await getDoc(doc(db, "users", userId));
-    const data = snapshot.exists() ? snapshot.data() : {};
+    const data = await withTimeout(store.get(["users", userId]));
+    if (!data) return {};
     return {
-      playHistory: Array.isArray(data.playHistory) ? data.playHistory : [],
       likedTracks: Array.isArray(data.likedTracks) ? data.likedTracks : [],
       customPlaylists: Array.isArray(data.customPlaylists) ? data.customPlaylists : [],
-      likedUpdatedAt: Number(data.likedUpdatedAt) || 0,
-      playlistsUpdatedAt: Number(data.playlistsUpdatedAt) || 0,
+      playHistory: Array.isArray(data.playHistory) ? data.playHistory : [],
       listenStats: data.listenStats && typeof data.listenStats === "object" ? data.listenStats : null,
     };
   } catch (err) {
-    console.warn("AuraSynq: couldn't load the library from the cloud", err);
     return null;
   }
-};
+}
 
-// Account deletion: remove everything stored for this listener
-export const deleteCloudLibrary = async (userId) => {
-  if (!userId || !db) return false;
+// The profile summary (name, photo, email) kept on the user document
+export async function syncProfileToCloud(user) {
+  if (!user?.id || !db) return false;
   try {
-    await deleteDoc(doc(db, "users", userId));
+    await withTimeout(setDoc(doc(db, "users", user.id), {
+      name: user.fullName || "Aura User",
+      avatarUrl: user.imageUrl || null,
+      email: user.email || null,
+    }, { merge: true }));
     return true;
   } catch (err) {
-    console.warn("AuraSynq: couldn't delete the cloud library", err);
     return false;
   }
-};
+}

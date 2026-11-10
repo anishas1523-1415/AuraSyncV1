@@ -198,3 +198,49 @@ export function resetTaste() {
   state = { tracks: {}, radio: { played: 0, skipped: 0 } };
   save();
 }
+
+// ─── Saving the taste profile to the listener's account ───
+// What the app learned (per-song feedback and Aura Radio's accuracy) follows the account to every
+// device. Merging keeps, for each song, whichever device judged it most recently; Aura Radio's
+// counters only grow, so the larger value wins. The short-lived session is never synced.
+
+const stableString = (v) => JSON.stringify(v);
+
+export function mergeTasteState(a, b) {
+  const A = a?.tracks ? a : { tracks: {}, radio: { played: 0, skipped: 0 } };
+  const B = b?.tracks ? b : { tracks: {}, radio: { played: 0, skipped: 0 } };
+  const tracks = { ...A.tracks };
+  for (const [id, entry] of Object.entries(B.tracks)) {
+    const mine = tracks[id];
+    const newer = !mine || (entry.at || 0) > (mine.at || 0) ||
+      ((entry.at || 0) === (mine.at || 0) && stableString(entry) > stableString(mine));
+    if (newer) tracks[id] = entry;
+  }
+  const ids = Object.keys(tracks);
+  if (ids.length > MAX_TRACKS) {
+    ids.sort((x, y) => (tracks[y].at || 0) - (tracks[x].at || 0)).slice(MAX_TRACKS).forEach((id) => delete tracks[id]);
+  }
+  return {
+    tracks,
+    radio: {
+      played: Math.max(A.radio?.played || 0, B.radio?.played || 0),
+      skipped: Math.max(A.radio?.skipped || 0, B.radio?.skipped || 0),
+    },
+    seeded: !!(A.seeded || B.seeded),
+  };
+}
+
+export function exportTaste() {
+  if (typeof window === "undefined") return { tracks: {}, radio: { played: 0, skipped: 0 }, seeded: false };
+  const s = load();
+  return { tracks: s.tracks, radio: s.radio, seeded: !!s.seeded };
+}
+
+export function applyTaste(merged) {
+  if (typeof window === "undefined") return;
+  const s = load();
+  s.tracks = merged.tracks;
+  s.radio = merged.radio;
+  s.seeded = merged.seeded;
+  save();
+}

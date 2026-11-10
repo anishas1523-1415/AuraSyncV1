@@ -41,8 +41,8 @@ function Toggle({ label, sub, checked, onChange }) {
 export default function Profile() {
   const { user, isLoaded, isSignedIn, isGuest, signOut, updateDisplayName, deleteAccount } = useAccount();
   const {
-    playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile, listenStats,
-    settings, updateSettings, clearHistory, syncNow, isSyncing, lastSyncedAt, isCloudSynced, deleteCloudData
+    playHistory, playTrack, currentTrack, isPlaying, togglePlay, deleteDownloadedTrack, getUserTasteProfile, lifetime,
+    settings, updateSettings, clearHistory, syncNow, syncState, pendingCount, lastSyncedAt, prepareSignOut, deleteCloudData
   } = useAudio();
   const [downloadedSongs, setDownloadedSongs] = useState([]);
   const [openPanel, setOpenPanel] = useState(null); // which settings group is expanded
@@ -59,7 +59,7 @@ export default function Profile() {
   }, []);
 
   // Memoize taste profile to avoid expensive recalculation on every render
-  const tasteProfile = useMemo(() => getUserTasteProfile(), [playHistory, getUserTasteProfile]);
+  const tasteProfile = useMemo(() => getUserTasteProfile(), [lifetime, getUserTasteProfile]);
 
   useEffect(() => {
     const loadDownloads = () => {
@@ -147,17 +147,23 @@ export default function Profile() {
   const email = isLoaded && user
     ? user.email
     : "Listening without an account";
-  const memberSince = isLoaded && user?.createdAt
-    ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+  // The month and year the account was created (Firebase's own record, shown in local time)
+  const createdDate = isLoaded && user?.createdAt ? new Date(user.createdAt) : null;
+  const memberSince = createdDate && !Number.isNaN(createdDate.getTime())
+    ? createdDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "";
 
   // Real listening time and lifetime plays (history only keeps the latest 50 songs)
-  const totalMinutes = Math.round((listenStats?.totalSeconds || 0) / 60);
-  const songsPlayed = Math.max(listenStats?.trackPlays || 0, playHistory.length);
-  const uniqueArtists = [...new Set(playHistory.map(t => t.artist))].length;
+  // Lifetime totals across every device the account has been used on (not just the last 50 plays)
+  const totalMinutes = Math.round((lifetime?.seconds || 0) / 60);
+  const songsPlayed = lifetime?.plays || 0;
+  const uniqueArtists = Object.keys(lifetime?.artists || {}).length;
 
   const handleSignOut = async () => {
     if (isSignedIn && !confirm("Sign out of AuraSynq? Your library stays saved to your account.")) return;
+    // Save everything first, so nothing made on this device is left behind
+    const saved = isSignedIn ? await prepareSignOut() : { ok: true };
+    if (!saved.ok && !confirm("Some recent changes couldn't reach your account yet (no connection?). They stay safely on this device and are added to your account the next time you sign in here. Sign out anyway?")) return;
     await signOut();
   };
 
@@ -301,7 +307,9 @@ export default function Profile() {
           <h4>{isSignedIn ? "Library sync" : "Not syncing"}</h4>
           <p>
             {isSignedIn
-              ? (isSyncing ? "Syncing your library…" : isCloudSynced && lastSyncedAt ? `Synced ${timeAgo(lastSyncedAt)}` : "Connecting to your account…")
+              ? (syncState === "syncing" ? "Syncing your library…"
+                : pendingCount > 0 ? `${pendingCount} ${pendingCount === 1 ? "change is" : "changes are"} waiting to sync${typeof navigator !== "undefined" && navigator.onLine === false ? " (offline)" : ""}`
+                : lastSyncedAt ? `Everything is saved · ${timeAgo(lastSyncedAt)}` : "Connecting to your account…")
               : "Sign in to keep likes, playlists and history on every device"}
           </p>
         </div>
@@ -323,7 +331,7 @@ export default function Profile() {
         <div className={styles.auraText}>
           <h2>Your Sound Aura</h2>
           <p>
-            {playHistory.length > 0
+            {tasteProfile.stats
               ? `Your aura is a neon blend of ${tasteProfile.topGenre} and ${tasteProfile.dominantMood} vibes. You vibe heavily with ${tasteProfile.topArtist}.`
               : "Start playing songs to build your aura"}
           </p>
@@ -371,7 +379,7 @@ export default function Profile() {
       )}
 
       {/* Taste Breakdown Details */}
-      {playHistory.length > 0 && tasteProfile.stats && (
+      {tasteProfile.stats && (
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Aura Breakdown</h2>
           <div className={styles.breakdownCard}>
