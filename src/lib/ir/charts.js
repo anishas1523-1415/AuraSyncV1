@@ -6,6 +6,85 @@ import { parseTitle, normalize } from "./text.js";
 import { reciprocalRankFusion, collapseDuplicates } from "./rank.js";
 import { classifyTrack } from "./classify.js";
 
+// ─── Language verification from YouTube's own video details ───
+// A song's tags and description almost always name its language ("Latest Tamil songs"), which is
+// stronger evidence than any word list. Each song is looked up once and remembered.
+const LANGUAGE_PATTERNS = {
+  tamil: /\b(tamil|kollywood)\b/gi,
+  telugu: /\b(telugu|tollywood)\b/gi,
+  hindi: /\b(hindi|bollywood)\b/gi,
+  malayalam: /\b(malayalam|mollywood)\b/gi,
+  kannada: /\b(kannada|sandalwood)\b/gi,
+  punjabi: /\b(punjabi)\b/gi,
+  bengali: /\b(bengali|bangla)\b/gi,
+  marathi: /\b(marathi)\b/gi,
+  bhojpuri: /\b(bhojpuri)\b/gi,
+  haryanvi: /\b(haryanvi)\b/gi,
+};
+const VOTES_KEY = "aurasynq_lang_votes";
+const votesMemo = new Map();
+let votesLoaded = false;
+const loadVotes = () => {
+  if (votesLoaded) return;
+  votesLoaded = true;
+  try {
+    for (const [id, votes] of Object.entries(JSON.parse(globalThis.localStorage?.getItem(VOTES_KEY) || "{}"))) votesMemo.set(id, votes);
+  } catch (e) {}
+};
+let votesTimer = null;
+const saveVotes = () => {
+  clearTimeout(votesTimer);
+  votesTimer = setTimeout(() => {
+    try {
+      const entries = [...votesMemo.entries()].slice(-1500);
+      globalThis.localStorage?.setItem(VOTES_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch (e) {}
+  }, 1000);
+};
+
+// { tamil: 3, telugu: 0, ... } from the video's keywords (counted double) and description, or null
+async function languageVotes(yt, videoId) {
+  loadVotes();
+  if (votesMemo.has(videoId)) return votesMemo.get(videoId);
+  try {
+    const info = await yt.getBasicInfo(videoId, "WEB");
+    const keywords = (info.basic_info?.keywords || []).join(" ");
+    const description = String(info.basic_info?.short_description || "").slice(0, 800);
+    const votes = {};
+    for (const [lang, pattern] of Object.entries(LANGUAGE_PATTERNS)) {
+      const n = (keywords.match(pattern) || []).length * 2 + (description.match(pattern) || []).length;
+      if (n) votes[lang] = n;
+    }
+    votesMemo.set(videoId, votes);
+    saveVotes();
+    return votes;
+  } catch (e) {
+    return null; // couldn't look it up: callers fall back to the word-list evidence
+  }
+}
+
+// accept = the song's own details agree with the language (or say nothing against it)
+function decideLanguage(language, ownLanguage, votes) {
+  if (votes && Object.keys(votes).length) {
+    const mine = votes[language] || 0;
+    const other = Math.max(0, ...Object.entries(votes).filter(([l]) => l !== language).map(([, n]) => n));
+    if (mine > 0 && mine >= other) return true;
+    if (other > mine) return false;
+  }
+  return !ownLanguage || ownLanguage === language;
+}
+
+// Walks the ranked songs, 8 at a time, keeping those that pass, until `count` have been kept
+async function filterByLanguage(yt, language, ranked, count, ownLanguage) {
+  const kept = [];
+  for (let i = 0; i < ranked.length && kept.length < count; i += 8) {
+    const chunk = ranked.slice(i, i + 8);
+    const votes = await Promise.all(chunk.map((t) => languageVotes(yt, t.id)));
+    chunk.forEach((t, j) => { if (decideLanguage(language, ownLanguage(t), votes[j])) kept.push(t); });
+  }
+  return kept.slice(0, count);
+}
+
 const CHART_TTL_MS = 3 * 60 * 60 * 1000;
 // Chart entries that aren't songs: film promos and announcements
 const NOT_A_SONG = /\b(glimpse|teaser|trailer|promo|first look|motion poster|making|behind the scenes|bts|interview|announcement|dialogue|scene)\b/i;
@@ -95,11 +174,13 @@ export async function languageTrending(yt, language, { country = "IN", count = 4
     const lang = ownLanguage(t);
     return !lang || lang === language;
   });
-  return fuse([
+  const ranked = fuse([
     { tracks: weeklyInLanguage, weight: 1.3 },
     { tracks: inLanguage(trending), weight: 1.1 },
     { tracks: inLanguage(daily), weight: 0.9 },
-  ], count);
+  ], count * 2);
+  // Last check, from YouTube's own tags and description of each song
+  return filterByLanguage(yt, language, ranked, count, ownLanguage);
 }
 
 // Trending now in the country, leaning toward the listener's languages
