@@ -116,40 +116,66 @@ export function createSearch(getClient) {
     const safe = (p) => p.catch(() => null);
     const wantsScore = /\b(bgm|score|theme)\b/.test(q.text);
 
-    const songsPromise = safe(songSearch(raw));
-    const languages = q.languages.length ? q.languages : topLanguages(profile);
+    // Songs' language: the one asked for, else the listener's, else the language they typed in
+    const languages = q.languages.length ? q.languages
+      : topLanguages(profile).length ? topLanguages(profile) : q.queryLanguage ? [q.queryLanguage] : [];
+    // Requests are searched without their asking words ("enaku melody songs venum" -> "melody songs").
+    // Dropping native asking words ("mujhe ... sunao") also drops their language, so a mood request
+    // typed in one keeps a language: "hindi sad songs", not English "sad songs"
+    let mainQuery = q.isRequest && q.searchText ? q.searchText : raw;
+    if (q.queryLanguage && !q.languages.length && q.intent === "mood" && languages[0]) {
+      mainQuery = `${languages[0]} ${mainQuery}`;
+    }
+    const songsPromise = safe(songSearch(mainQuery));
+    // A name plus a mood ("ilaiyaraaja melody", "vijay songs for gym"): also search the name with
+    // each mood ("vijay gym songs"); used only if the name turns out to be an artist or a film
+    const nameMood = q.intent === "album_or_artist" && q.bases.length && q.entity;
     const [songs, albumRaw, artistRaw, ...expanded] = await Promise.all([
       songsPromise,
       q.intent === "album" || q.intent === "album_or_artist"
         ? safe(filmAlbum(q.entity, { wantsScore, languages, songsPromise })) : null,
       q.intent === "album_or_artist" || q.intent === "song_or_artist" ? safe(artistTopSongs(q.entity)) : null,
       ...(q.intent === "mood" ? q.expansions.slice(0, 2).map((e) => safe(songSearch(e))) : []),
+      ...(nameMood ? q.bases.slice(0, 2).map((b) => safe(songSearch(`${q.entity} ${b}`))) : []),
     ]);
 
     // "kavala song" names a song, not the artist "Kavala": when the best song hit is titled like
     // the request, it's a song search and the artist/album guesses are dropped
     const top = (songs || [])[0];
     const titledLikeQuery = top && q.intent !== "album" && nameMatch(q.entity, parseTitle(top.title).song) >= 0.8;
-    const album = titledLikeQuery ? null : albumRaw;
-    // A film's soundtrack beats a same-named artist ("leo songs" is the film, not Leo Middea)
+    // A film's soundtrack beats a same-named artist ("leo songs" is the film, not Leo Middea), but only
+    // when the album is named just that: "vijay" is the singer, not the dub "Vijay the Master"
+    const albumName = albumCore(String(albumRaw?.[0]?.album || "").replace(/\((tamil|telugu|hindi|malayalam|kannada)\)/i, ""));
+    const albumExact = !!albumRaw?.length && nameMatch(albumName, q.entity) >= 0.8;
+    const artistFound = !!artistRaw?.tracks?.length;
+    const album = titledLikeQuery || (artistFound && !albumExact) ? null : albumRaw;
     const artist = titledLikeQuery || album?.length ? null : artistRaw;
+    // "arabic kuthu" is a title that happens to contain a mood word: treat it as a song search
+    const intent = titledLikeQuery && q.intent === "album_or_artist" ? "song" : q.intent;
 
     const lists = [{ tracks: songs || [], weight: 1 }];
     if (album?.length) lists.push({ tracks: album, weight: 1.6 });
     if (artist?.tracks?.length) lists.push({ tracks: artist.tracks, weight: 1.2 });
-    expanded.forEach((tracks) => tracks?.length && lists.push({ tracks, weight: 0.7 }));
+    // (Mood expansions run only for mood requests, name + mood searches only for name requests)
+    const nameResolved = !!(album?.length || artist?.tracks?.length);
+    expanded.forEach((tracks) => {
+      if (nameMood && !nameResolved) return; // the name wasn't an artist or a film
+      if (tracks?.length) lists.push({ tracks, weight: nameMood ? 0.9 : 0.7 });
+    });
 
-    let ranked = score([q], reciprocalRankFusion(lists), { profile, album, artist, trending });
+    const moods = intent === "song" ? [] : q.moods;
+    const ctx = { profile, album, artist, trending, moods, languageHint: q.queryLanguage };
+    let ranked = score([q], reciprocalRankFusion(lists), ctx);
 
     // Weak matches: try YouTube Music's spelling suggestion ("vathi comming" -> "vaathi coming")
-    if (q.intent !== "mood" && (!ranked.length || ranked[0].cov < 0.6)) {
-      const corrected = await suggestion(raw);
+    if (intent !== "mood" && (!ranked.length || ranked[0].cov < 0.6)) {
+      const corrected = await suggestion(mainQuery);
       if (corrected) {
         const extra = await safe(songSearch(corrected));
         if (extra?.length) {
           lists.push({ tracks: extra, weight: 1.3 });
           // Score against both spellings, so neither the typed nor the corrected words lose out
-          ranked = score([q, analyzeQuery(corrected)], reciprocalRankFusion(lists), { profile, album, artist, trending });
+          ranked = score([q, analyzeQuery(corrected)], reciprocalRankFusion(lists), ctx);
         }
       }
     }
@@ -158,7 +184,7 @@ export function createSearch(getClient) {
 
     // Precision: for a specific song, drop results that share nothing with the query and fill the
     // tail with songs like the top hit instead (pseudo-relevance feedback: assume it's relevant)
-    if (q.intent === "song" || q.intent === "song_or_artist") {
+    if (intent === "song" || intent === "song_or_artist") {
       const strong = ranked.filter((r) => r.cov >= 0.5 || r.boosted);
       if (strong.length && strong.length < ranked.length) {
         let related = [];
@@ -176,9 +202,12 @@ export function createSearch(getClient) {
 
   // Final relevance score for every fused candidate (`queries`: the typed query and, if any, its
   // spelling correction; each signal takes the better of the two)
-  function score(queries, fused, { profile, album, artist, trending }) {
+  function score(queries, fused, { profile, album, artist, trending, moods = [], languageHint = null }) {
     const q = queries[0];
-    const regional = regionalLanguages(profile);
+    const learned = regionalLanguages(profile);
+    // The typing language ("enaku ... venum") leads when the listener's taste names no language yet
+    const regional = languageHint && !learned.includes(languageHint) && !topLanguages(profile).length
+      ? [languageHint, ...learned] : learned;
     const tracks = fused.map((f) => f.track);
     classifyList(tracks);
     const bm25 = tracks.map((_, i) => Math.max(...queries.map((v) => bm25ByQuery(v, tracks)[i])));
@@ -202,6 +231,12 @@ export function createSearch(getClient) {
         const lang = classifyTrack(track).language;
         if (lang && q.languages.includes(lang)) s += 0.15;
         else if (lang) s -= 0.2;
+      }
+      // A song classified with the requested mood fits better (most songs carry no mood label, so
+      // there is no penalty for a missing one)
+      if (moods.length) {
+        const mood = classifyTrack(track).mood;
+        if (mood && moods.includes(mood)) s += 0.1;
       }
       if (q.intent === "mood") boosted = true; // every mood result is "about" the request
       if (profile) s += 0.15 * cosine(profile, trackFeatures(track));

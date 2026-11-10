@@ -44,7 +44,32 @@ export const MOODS = {
   old: { mood: "retro", expand: ["old songs", "evergreen songs", "retro songs"] },
   retro: { mood: "retro", expand: ["retro songs", "old songs"] },
   evergreen: { mood: "retro", expand: ["evergreen songs", "old songs"] },
+  // Activities and genres people ask for by name
+  driving: { mood: "happy", expand: ["driving songs", "road trip songs"] },
+  study: { mood: "calm", expand: ["study music", "focus songs"] },
+  studying: { mood: "calm", expand: ["study music", "focus songs"] },
+  focus: { mood: "calm", expand: ["focus songs", "study music"] },
+  running: { mood: "energetic", expand: ["running songs", "workout songs"] },
+  wedding: { mood: "party", expand: ["wedding songs", "dance songs"] },
+  gaana: { mood: "party", expand: ["gaana songs", "kuthu songs"] },
 };
+
+// Words that ask for music rather than name it ("enaku ... venum", "mujhe ... sunao", "i want ...").
+// They are dropped only from requests (see isRequest), never from a title like "I Want It That Way".
+// Native-language request words also say which language the listener is typing in.
+const REQUEST_WORDS = {
+  tamil: ["enaku", "enakku", "venum", "vendum", "podu", "poodu", "kekanum", "kekkanum"],
+  hindi: ["mujhe", "chahiye", "sunao", "bajao", "lagao", "sunna", "sunni"],
+  english: ["i", "want", "need", "some", "please", "give", "me", "for", "listen", "something", "any", "can", "you", "put", "on"],
+};
+const REQUEST_LANGUAGE = Object.fromEntries(
+  Object.entries(REQUEST_WORDS).flatMap(([lang, words]) => words.map((w) => [w, lang])),
+);
+// Words that show the text is a request for songs, not a song title
+const SONG_WORDS = new Set(["song", "songs", "music", "hits", "paatu", "paattu", "padal", "paadal", "gaane", "gaana"]);
+
+// "90s", "80's", "2000s", "1990s" -> an era
+const ERA = /^(19|20)?\d0s$/;
 
 // "master movie songs", "jailer bgm", "96 soundtrack" -> the film/album name
 const ALBUM_PATTERN = /^(.+?)\s+(movie|film|padam|album|ost|soundtrack|jukebox)\b/i;
@@ -52,35 +77,57 @@ const SONGS_SUFFIX = /^(.+?)\s+(songs|song|hits)$/i;
 
 export function analyzeQuery(raw = "") {
   const text = normalize(raw);
-  const tokens = tokenize(raw);
-  const content = tokens.filter((t) => !STOPWORDS.has(t));
-  const languages = [...new Set(tokens.map((t) => LANGUAGE_WORDS[t]).filter(Boolean))];
-  const moodWords = tokens.filter((t) => MOODS[t]);
+  const allTokens = tokenize(raw);
+  const languages = [...new Set(allTokens.map((t) => LANGUAGE_WORDS[t]).filter(Boolean))];
+  const moodWords = allTokens.filter((t) => MOODS[t]);
+  const era = allTokens.find((t) => ERA.test(t)) || "";
   const variants = Object.keys(VARIANT_TERMS).filter((v) => VARIANT_TERMS[v].test(raw));
 
-  // Words left after removing languages, moods and request words: the "topic"
-  const topic = content.filter((t) => !LANGUAGE_WORDS[t] && !MOODS[t]);
+  // A request names a mood, activity, language, era or "songs"; a bare title does none of these
+  const isRequest = !!(moodWords.length || languages.length || era || allTokens.some((t) => SONG_WORDS.has(t)));
+  const requestWords = isRequest ? allTokens.filter((t) => REQUEST_LANGUAGE[t]) : [];
+  const tokens = isRequest ? allTokens.filter((t) => !REQUEST_LANGUAGE[t]) : allTokens;
+  // The language the listener typed in (Tanglish "enaku ... venum" -> tamil), not the language of the
+  // songs they asked for: a hint, used only when the request and their taste name none
+  const queryLanguage = requestWords.map((w) => REQUEST_LANGUAGE[w]).find((l) => l !== "english") || null;
+  // What to send to the music search: the request without its asking words
+  const searchText = tokens.join(" ");
+  const content = tokens.filter((t) => !STOPWORDS.has(t));
+
+  // Words left after removing languages, moods, era and request words: the "topic"
+  const topic = content.filter((t) => !LANGUAGE_WORDS[t] && !MOODS[t] && t !== era);
+  const notFacet = (t) => !LANGUAGE_WORDS[t] && !MOODS[t] && t !== era;
 
   let intent = "song";
   let entity = "";
-  const albumMatch = text.match(ALBUM_PATTERN);
-  const songsMatch = text.match(SONGS_SUFFIX);
-  if (!topic.length && (moodWords.length || languages.length)) {
-    intent = "mood"; // "sad tamil songs", "workout", "tamil"
+  const albumMatch = searchText.match(ALBUM_PATTERN);
+  const songsMatch = searchText.match(SONGS_SUFFIX);
+  if (!topic.length && (moodWords.length || languages.length || era)) {
+    intent = "mood"; // "sad tamil songs", "workout", "tamil", "90s hindi romantic songs"
   } else if (albumMatch && topic.length) {
     intent = "album";
     entity = albumMatch[1];
   } else if (songsMatch && topic.length && topic.length <= 4) {
     intent = "album_or_artist"; // "jailer songs" (film) or "anirudh songs" (artist): decided later
-    entity = songsMatch[1].split(" ").filter((t) => !LANGUAGE_WORDS[t] && !MOODS[t]).join(" ");
+    entity = songsMatch[1].split(" ").filter(notFacet).join(" ");
+  } else if ((moodWords.length || era) && topic.length && topic.length <= 3) {
+    intent = "album_or_artist"; // "sid sriram melody", "vijay songs for gym": a name plus a mood
+    entity = topic.join(" ");
   } else if (topic.length <= 3 && !moodWords.length && tokens.length <= 3) {
     intent = "song_or_artist"; // "kesariya", "anirudh", "sid sriram"
     entity = topic.join(" ");
   }
 
   const moods = [...new Set(moodWords.map((w) => MOODS[w].mood))];
-  const expansions = [...new Set(moodWords.flatMap((w) => MOODS[w].expand))]
-    .map((e) => (languages[0] ? `${languages[0]} ${e}` : e));
+  // Widened searches carry the requested language (else the typing language) and the era:
+  // "90s hindi romantic songs" -> "hindi 90s romantic songs", "hindi 90s love songs"
+  const expandLanguage = languages[0] || queryLanguage || "";
+  const bases = [...new Set(moodWords.flatMap((w) => MOODS[w].expand))];
+  if (!bases.length && era) bases.push("songs", "hit songs");
+  const expansions = bases.map((e) => [expandLanguage, era, e].filter(Boolean).join(" "));
 
-  return { raw, text, tokens, content, topic, intent, entity, languages, moods, variants, expansions };
+  return {
+    raw, text, tokens, allTokens, content, topic, intent, entity, languages, queryLanguage, era, moods,
+    variants, expansions, bases, isRequest, searchText,
+  };
 }
