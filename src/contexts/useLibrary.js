@@ -11,7 +11,7 @@ import {
 } from "@/lib/library";
 import { creditedArtists, genreOf, moodOf } from "@/lib/activity";
 import { syncBlob, readCloud, writeMarker, loadLegacyLibrary, syncProfileToCloud, deleteCloudLibrary } from "@/lib/dbSync";
-import { exportTaste, applyTaste, mergeTasteState, resetTaste, seedFromLibrary } from "@/lib/ir/profile";
+import { exportTaste, applyTaste, mergeTasteState, resetTaste, seedFromLibrary, subscribeTaste } from "@/lib/ir/profile";
 
 const KEYS = {
   liked: "aurasynq_liked_songs_metadata",
@@ -47,9 +47,9 @@ const MERGE = {
   taste: mergeTasteState,
   settings: mergeSettings,
 };
-const DEBOUNCE_MS = 1500;
-const ACTIVITY_MIN_INTERVAL_MS = 60000; // listening time changes constantly: save at most once a minute
-const RETRY_MS = 45000;
+const DEBOUNCE_MS = 800;                  // a like or playlist edit reaches the account within about a second
+const ACTIVITY_MIN_INTERVAL_MS = 15000;  // listening time changes constantly: at most every 15 seconds
+const RETRY_MS = 30000;                   // while anything is unsaved (offline, error)
 
 const newId = () => `d_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 const getDeviceId = () => {
@@ -318,6 +318,11 @@ export function useLibrary(user, { onAccountChange } = {}) {
     if (userIdRef.current) schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [likedTracks, customPlaylists, playHistory, settings, lifetime, libraryReady]);
+
+  // What the app learns from listening is saved within seconds too
+  useEffect(() => subscribeTaste(() => { if (userIdRef.current) schedule(); }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []);
 
   useEffect(() => {
     const retry = () => { if (userIdRef.current && dirtyNames().length) runSync(); };

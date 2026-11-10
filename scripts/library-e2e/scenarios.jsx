@@ -3,7 +3,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { useLibrary } from "@/contexts/useLibrary";
-import { resetTaste } from "@/lib/ir/profile";
+import { resetTaste, recordFeedback } from "@/lib/ir/profile";
 import { CLOUD } from "@harness/fakeDb.js";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -273,6 +273,21 @@ export async function run() {
     assert.ok(await phone.until((l) => l.syncState === "synced" && l.pendingCount === 0, 8000), "synced on its own");
     assert.ok(cloudJson("u1", "liked").items.some((t) => t.id === "auto"));
     await phone.close();
+  });
+
+  await scenario("what the app learns from listening reaches the account within seconds, and follows it to a new device", async () => {
+    const phone = await openDevice("phone", U1);
+    await act(async () => { recordFeedback(song("fav"), "like"); await sleep(10); });
+    const t0 = Date.now();
+    let saved = false;
+    while (Date.now() - t0 < 5000 && !saved) { await act(async () => { await sleep(100); }); saved = !!CLOUD.docs.get("users/u1/lib/taste") && JSON.stringify(cloudJson("u1", "taste")).includes("fav"); }
+    assert.ok(saved, "taste reached the cloud in under 5 seconds");
+    assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
+    await phone.close();
+    const web = await openDevice("web", U1);
+    const { exportTaste } = await import("@/lib/ir/profile");
+    assert.ok(Object.keys(exportTaste().tracks).includes("fav"), "new device has the learned taste");
+    await web.close();
   });
 
   await scenario("a connection that drops mid-session is retried automatically", async () => {

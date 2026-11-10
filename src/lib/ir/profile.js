@@ -27,8 +27,16 @@ const load = () => {
   return state;
 };
 let saveTimer = null;
+const listeners = new Set();
+// Lets the account sync hear about every change to what was learned, so it saves within seconds
+export function subscribeTaste(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
 const save = () => {
   profileCache = null;
+  listeners.forEach((fn) => { try { fn(); } catch (e) {} });
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}

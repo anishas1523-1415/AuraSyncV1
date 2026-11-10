@@ -5,6 +5,7 @@ import { useAudio } from "@/contexts/AudioContext";
 import { toast } from "@/lib/toast";
 import MiniPlayer from "./MiniPlayer";
 import NetworkBanner from "./NetworkBanner";
+import UpdateBanner from "./UpdateBanner";
 import AuraTour from "./AuraTour";
 import SoftStatusBar from "./SoftStatusBar";
 import AuraDial from "./AuraDial";
@@ -141,6 +142,7 @@ export default function AppShell() {
       <MiniPlayer />
       <AuraDial />
       <NetworkBanner />
+      <UpdateBanner />
       <AuraTour />
       {isMobileApp && <SoftStatusBar />}
 

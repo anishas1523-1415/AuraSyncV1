@@ -1293,7 +1293,7 @@ export function AudioProvider({ children }) {
         }
       }
       lastTickRef.current = t;
-      if (pendingListenRef.current >= 15) flushListenStats();
+      if (pendingListenRef.current >= 10) flushListenStats();
       // Playing smoothly again after a reconnect: allow future recoveries
       if (recoveryRef.current.attempts && t > recoveryRef.current.resumeAt + 10) {
         recoveryRef.current.attempts = 0;
