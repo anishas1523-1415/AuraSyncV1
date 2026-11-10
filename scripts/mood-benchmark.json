@@ -1,5 +1,5 @@
 {
-  "about": "Mood labels for scripts/mood-eval.mjs. Hand-labelled from general knowledge of these widely known songs (not from any classifier); several moods are listed when a song honestly fits more than one, and any of them counts as correct. Owner: review and correct as needed. Each entry is [search query, accepted moods]; the eval looks the query up on YouTube Music and classifies the top song.",
+  "about": "Mood labels for scripts/mood-eval.mjs. Hand-labelled from general knowledge of these widely known songs (not from any classifier), reviewed by the owner on 2026-11-10; several moods are listed when a song honestly fits more than one, and any of them counts as correct. Each entry is [search query, accepted moods]; the eval looks the query up on YouTube Music and classifies the top song.",
   "songs": [
     ["munbe vaa", ["romantic"]],
     ["kannazhaga 3", ["romantic"]],

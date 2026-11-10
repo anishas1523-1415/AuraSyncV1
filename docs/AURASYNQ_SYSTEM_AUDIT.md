@@ -348,7 +348,7 @@ Of the 31 existing benchmark queries, only two parse differently:
 
 - **Coverage of older songs is low.** Many Tamil and Telugu classics ("Munbe Vaa", "Samajavaragamana") are on no editorial mood playlist; 62% of labelled songs still get no mood.
 - **Remaining errors are borderline.** Most mix up neighbouring moods: romantic vs happy, party vs energetic.
-- **Benchmark labels are unreviewed.** `scripts/mood-benchmark.json` was hand-labelled from general knowledge and should be checked by the owner.
+- **Benchmark labels.** `scripts/mood-benchmark.json` was hand-labelled from general knowledge and reviewed by the owner on 2026-11-10.
 - **Website gets nothing yet.** Website listeners rank radio in the browser, which has no YouTube client, so they don't get the index. Serving it would need a new API endpoint, which requires approval.
 - **Storage use.** The index takes about 250 KB of the device's local storage.
 
