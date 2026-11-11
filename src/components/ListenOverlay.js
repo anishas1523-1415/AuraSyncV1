@@ -15,7 +15,8 @@ const HINTS = {
   song: ["Hum, whistle or sing the tune", "The chorus works best", "No words needed"],
 };
 
-export default function ListenOverlay({ open, initialMode = "voice", canHum = true, onClose, onVoiceCommand, onSongResults }) {
+// canVoice: false on phones without a speech recognition service (Song mode only, Voice tab hidden)
+export default function ListenOverlay({ open, initialMode = "voice", canHum = true, canVoice = true, onClose, onVoiceCommand, onSongResults }) {
   const { isPlaying, togglePlay } = useAudio();
   const [mode, setMode] = useState(initialMode);
   const [phase, setPhase] = useState("idle"); // listening | working | none | error | idle
@@ -149,9 +150,11 @@ export default function ListenOverlay({ open, initialMode = "voice", canHum = tr
           <X size={22} />
         </button>
         <div className={`glass ${styles.modes}`} role="tablist">
-          <button role="tab" aria-selected={mode === "voice"} className={`${styles.mode} ${mode === "voice" ? styles.modeActive : ""}`} onClick={() => mode !== "voice" && setMode("voice")}>
-            <Microphone size={16} weight={mode === "voice" ? "fill" : "regular"} /> Voice
-          </button>
+          {canVoice && (
+            <button role="tab" aria-selected={mode === "voice"} className={`${styles.mode} ${mode === "voice" ? styles.modeActive : ""}`} onClick={() => mode !== "voice" && setMode("voice")}>
+              <Microphone size={16} weight={mode === "voice" ? "fill" : "regular"} /> Voice
+            </button>
+          )}
           {canHum && (
             <button role="tab" aria-selected={mode === "song"} className={`${styles.mode} ${mode === "song" ? styles.modeActive : ""}`} onClick={() => mode !== "song" && setMode("song")}>
               <Waveform size={16} weight={mode === "song" ? "fill" : "regular"} /> Song

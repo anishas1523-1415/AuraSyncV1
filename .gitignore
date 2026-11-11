@@ -69,3 +69,13 @@ scripts/library-e2e/.bundle.cjs
 
 # firebase cache
 /.firebase/
+
+# Local experiments and duplicate assets (kept on disk, not in the repository)
+/find-proxy.js
+/test-clients.js
+/test-proxy.js
+/test-stream.js
+/logo/*(1).png
+/logo/*(2).png
+/logo/*(3).png
+!/logo/AuraSynq Neon Audio Emblem (1).png

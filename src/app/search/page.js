@@ -238,7 +238,7 @@ export default function Search() {
               <X size={16} />
             </button>
           )}
-          {!query && canListen && (
+          {!query && (canListen || canHum) && (
             <button
               className={`${styles.micBtn} ${listenOpen ? styles.micBtnActive : ""}`}
               onClick={() => setListenOpen(true)}
@@ -375,6 +375,8 @@ export default function Search() {
       <ListenOverlay
         open={listenOpen}
         canHum={canHum}
+        canVoice={canListen}
+        initialMode={canListen ? "voice" : "song"}
         onClose={() => setListenOpen(false)}
         onVoiceCommand={handleVoiceCommand}
         onSongResults={handleSongResults}

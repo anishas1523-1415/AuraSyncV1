@@ -173,11 +173,28 @@ async function indexOne(track, blob) {
   refsCache = null;
 }
 
+// Learning costs a few seconds of processing per song: it waits while the battery is low and the
+// phone isn't charging, and picks up again later (Battery Status API where the WebView has it)
+const LOW_BATTERY = 0.3;
+const RETRY_LOW_BATTERY_MS = 5 * 60 * 1000;
+async function batteryLow() {
+  try {
+    const battery = await navigator.getBattery?.();
+    return !!battery && !battery.charging && battery.level < LOW_BATTERY;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function drain() {
   if (running) return;
   running = true;
   try {
     while (queue.length) {
+      if (await batteryLow()) {
+        setTimeout(drain, RETRY_LOW_BATTERY_MS);
+        break;
+      }
       const { track, blob } = queue.shift();
       queued.delete(track.id);
       try {

@@ -2,7 +2,7 @@
 // -> BM25 + priors + personal taste -> near-duplicate collapse -> pseudo-relevance feedback.
 // `getClient` resolves to a youtubei.js Innertube instance (server, phone or the eval script).
 import { analyzeQuery } from "./query.js";
-import { normalize, tokenize, jaccard, termMatch, parseTitle } from "./text.js";
+import { normalize, tokenize, jaccard, termMatch, parseTitle, STOPWORDS } from "./text.js";
 import { bm25Scores, coverage, reciprocalRankFusion, qualityPrior, collapseDuplicates, cosine } from "./rank.js";
 import { classifyTrack, classifyList, trackFeatures } from "./classify.js";
 import { regionalLanguages, regionalScore, trendScore } from "./signals.js";
@@ -131,8 +131,13 @@ export function createSearch(getClient) {
       mainQuery = `${languages[0]} ${mainQuery}`;
     }
     const songsPromise = safe(songSearch(mainQuery));
+    // The whole spoken sentence is searched too, but only when it says more than the parsed words
+    // (at least two meaningful words they left out): "play kesariya" doesn't need a second search,
+    // "play that song from leo where vijay dances" does
     const sentence = String(spoken || "").trim();
-    const spokenPromise = sentence && normalize(sentence) !== normalize(mainQuery) ? safe(songSearch(sentence)) : Promise.resolve(null);
+    const parsedWords = new Set(tokenize(mainQuery));
+    const extraWords = tokenize(sentence).filter((w) => !parsedWords.has(w) && !STOPWORDS.has(w) && w.length > 2);
+    const spokenPromise = sentence && extraWords.length >= 2 ? safe(songSearch(sentence)) : Promise.resolve(null);
     // A name plus a mood ("ilaiyaraaja melody", "vijay songs for gym"): also search the name with
     // each mood ("vijay gym songs"); used only if the name turns out to be an artist or a film
     const nameMood = q.intent === "album_or_artist" && q.bases.length && q.entity;

@@ -95,8 +95,9 @@ export function startVoiceSession({ onPartial, onEnd, onError }) {
       // Watchdog. Android's recogniser gives up on its own: no speech within ~5 s ("no match",
       // "speech timeout"), "recogniser busy", network hiccups. The plugin can't report those once
       // listening has started, so the screen kept saying "Listening…" over a dead recogniser.
-      // Checked twice a second: if it stopped without hearing words, it is started again (up to
-      // 20 s in all), the way YouTube's voice search keeps waiting; if it heard words, they're used.
+      // Checked twice a second: if it stopped without hearing words, it is started again (at most 3
+      // times within 15 s: some phones beep on every start), the way YouTube's voice search keeps
+      // waiting; if it heard words, they're used.
       watch = setInterval(async () => {
         if (stopped || finished) return;
         const { listening } = await sr.isListening().catch(() => ({ listening: true }));
@@ -104,7 +105,7 @@ export function startVoiceSession({ onPartial, onEnd, onError }) {
         if (latest.length) {
           stopped = true;
           settle(1200);
-        } else if (Date.now() - startedAt < 20000 && restarts < 6) {
+        } else if (Date.now() - startedAt < 15000 && restarts < 3) {
           restarts++;
           await new Promise((r) => setTimeout(r, 250)); // let the old recogniser release the mic
           if (!stopped && !finished) listen().catch(() => {});

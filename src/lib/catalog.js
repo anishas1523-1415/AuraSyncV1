@@ -82,15 +82,16 @@ const country = () => {
 
 // Official YouTube Music charts: kind "now" (trending in the country, leaning toward the
 // listener's languages) or a language ("tamil"). Phone first, the server as fallback.
-// On the phone the chart pool is ~80 songs (the server route returns 40), so chart pages can keep
-// changing from one Sync to the next
-const CHART_POOL = 80;
+// On the phone the chart pool is larger than the server route's 40, so chart pages can keep changing
+// from one Sync to the next. Language charts check each song's language online (slower, more data),
+// so their pool is smaller.
+const chartPool = (kind) => (kind === "now" ? 80 : 56);
 
 export function chartSongs(kind, { fresh = false } = {}) {
   const languages = regionalLanguages(getProfile());
-  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}:${CHART_POOL}`;
+  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
   return cached(key, () => lookup(
-    (m) => m.chartSongs(kind, { country: country(), languages, count: CHART_POOL }),
+    (m) => m.chartSongs(kind, { country: country(), languages, count: chartPool(kind) }),
     { chart: kind, country: country(), langs: languages.join(",") },
   ), fresh);
 }
@@ -118,15 +119,18 @@ export function trendingIds() {
 // (instant, no network), then YouTube Music's suggestions for it.
 const suggestCache = new Map();
 
-// App tools that typing can reach: "h", "hum", "hum l…" suggests Hum Lab (it has no other link)
-const TOOLS = [{ text: "Hum Lab", names: ["humlab", "hum lab"], href: "/humlab" }];
+// App tools that typing can reach: "hum", "hum l…" suggests Hum Lab (it has no other link). From
+// just "h" only for people who have used it, so ordinary listeners aren't shown a tool they don't know.
+const TOOLS = [{ text: "Hum Lab", names: ["humlab", "hum lab"], href: "/humlab", usedKey: "aurasynq_humlab_profile" }];
 
 export function localSuggestions(text) {
   const q = normalize(text);
   if (!q || typeof window === "undefined") return [];
   const out = [];
   for (const tool of TOOLS) {
-    if (tool.names.some((n) => n.startsWith(q))) out.push({ text: tool.text, kind: "tool", href: tool.href });
+    let used = false;
+    try { used = !!localStorage.getItem(tool.usedKey); } catch (e) {}
+    if ((q.length >= 3 || used) && tool.names.some((n) => n.startsWith(q))) out.push({ text: tool.text, kind: "tool", href: tool.href });
   }
   try {
     JSON.parse(localStorage.getItem("aurasynq_recent_searches") || "[]")
@@ -280,7 +284,7 @@ const SHOWN_KEY = "aurasynq_shown_v1";
 const SEEDS_KEY = "aurasynq_seed_history_v1";
 const SHOWN_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const SHOWN_MAX = 300; // per list
-const REUSE_MS = 10 * 60 * 1000;
+const REUSE_MS = 60 * 60 * 1000; // an hour: lists don't change under you while browsing
 const lastLists = new Map(); // key -> { at, tracks }: the list as last shown in this session
 
 const readJSON = (k, fallback) => {
@@ -331,15 +335,16 @@ function rememberSeeds(key, chosen) {
 }
 
 // A page of a chart (Trending, a language's chart): each Sync shows the chart songs this list
-// showed longest ago (never-shown first), shuffled; opening again within minutes shows the same.
-// On the phone the chart pool is ~80 songs (the server's is 40), so pages keep changing.
+// showed longest ago (never-shown first), in chart rank order (top hits first); opening again within
+// the hour shows the same. The phone's larger chart pool keeps pages changing.
 export async function chartPage(kind, count, { fresh = false } = {}) {
   const key = `chartpage:${kind}`;
   const reuse = recentList(key, fresh);
   if (reuse) return reuse;
   const chart = await chartSongs(kind, { fresh: false });
   if (chart.length < count) return [];
-  return showList(key, shuffle(preferUnseen(key, chart, count)));
+  const rank = new Map(chart.map((t, i) => [t.id, i]));
+  return showList(key, preferUnseen(key, chart, count).sort((a, b) => rank.get(a.id) - rank.get(b.id)));
 }
 
 // Personal mix: songs that the radios of the listener's favourites (from every side of their
