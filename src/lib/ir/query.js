@@ -65,6 +65,16 @@ const REQUEST_WORDS = {
 const REQUEST_LANGUAGE = Object.fromEntries(
   Object.entries(REQUEST_WORDS).flatMap(([lang, words]) => words.map((w) => [w, lang])),
 );
+// "I" in a request ("naan sad songs kekanum", "main sad songs sunna chahta hoon"). These are also
+// names ("Naan" is a film, "Main Hoon Na" a title), so they count as asking words only when another
+// asking word is in the same request.
+const PRONOUNS = {
+  tamil: ["naan", "nan", "naanum"],
+  hindi: ["main", "mai", "hoon", "hun", "chahta", "chahti"],
+};
+const PRONOUN_LANGUAGE = Object.fromEntries(
+  Object.entries(PRONOUNS).flatMap(([lang, words]) => words.map((w) => [w, lang])),
+);
 // Words that show the text is a request for songs, not a song title
 const SONG_WORDS = new Set(["song", "songs", "music", "hits", "paatu", "paattu", "padal", "paadal", "gaane", "gaana"]);
 
@@ -85,11 +95,15 @@ export function analyzeQuery(raw = "") {
 
   // A request names a mood, activity, language, era or "songs"; a bare title does none of these
   const isRequest = !!(moodWords.length || languages.length || era || allTokens.some((t) => SONG_WORDS.has(t)));
-  const requestWords = isRequest ? allTokens.filter((t) => REQUEST_LANGUAGE[t]) : [];
-  const tokens = isRequest ? allTokens.filter((t) => !REQUEST_LANGUAGE[t]) : allTokens;
+  const asking = isRequest ? allTokens.filter((t) => REQUEST_LANGUAGE[t]) : [];
+  // Pronouns go too, but only beside a real asking word ("naan ... kekanum", not "naan songs")
+  const pronouns = asking.length ? allTokens.filter((t) => PRONOUN_LANGUAGE[t]) : [];
+  const dropped = new Set([...asking, ...pronouns]);
+  const requestWords = [...asking, ...pronouns];
+  const tokens = isRequest ? allTokens.filter((t) => !dropped.has(t)) : allTokens;
   // The language the listener typed in (Tanglish "enaku ... venum" -> tamil), not the language of the
   // songs they asked for: a hint, used only when the request and their taste name none
-  const queryLanguage = requestWords.map((w) => REQUEST_LANGUAGE[w]).find((l) => l !== "english") || null;
+  const queryLanguage = requestWords.map((w) => REQUEST_LANGUAGE[w] || PRONOUN_LANGUAGE[w]).find((l) => l !== "english") || null;
   // What to send to the music search: the request without its asking words
   const searchText = tokens.join(" ");
   const content = tokens.filter((t) => !STOPWORDS.has(t));

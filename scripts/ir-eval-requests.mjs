@@ -14,6 +14,7 @@ const REQUESTS = [
   { q: "Play sad Tamil songs", lang: "tamil" },
   { q: "90s Hindi romantic songs", lang: "hindi" },
   { q: "mujhe sad songs sunao", lang: "hindi" },
+  { q: "naan sad songs kekanum", lang: "tamil" },
   { q: "Ilayaraja old love songs", artist: /ilaiyaraaja|ilayaraja|ilaiyaraja/i },
   { q: "Vijay songs for gym", artist: /\bvijay\b/i },
   { q: "sid sriram melody", artist: /sid sriram/i },

@@ -22,6 +22,13 @@ const CASES = [
   { q: "kuthu songs podu", intent: "mood", moods: ["party"], queryLanguage: "tamil", searchText: "kuthu songs" },
   { q: "i want some workout songs", intent: "mood", moods: ["energetic"], searchText: "workout songs" },
   { q: "tamil gaana songs", intent: "mood", languages: ["tamil"], moods: ["party"] },
+  // "I" / "me" are asking words only beside another asking word: "naan" is also a film
+  { q: "naan sad songs kekanum", intent: "mood", moods: ["sad"], queryLanguage: "tamil", searchText: "sad songs" },
+  { q: "nan melody songs kekkanum", intent: "mood", moods: ["romantic"], queryLanguage: "tamil", searchText: "melody songs" },
+  { q: "main sad songs sunna chahta hoon", intent: "mood", moods: ["sad"], queryLanguage: "hindi", searchText: "sad songs" },
+  { q: "naan movie songs", intent: "album", entity: "naan" },
+  { q: "naan songs", intent: "album_or_artist", entity: "naan" },
+  { q: "main hoon na songs", intent: "album_or_artist", entity: "main hoon na" },
   // Mood expansions carry the era and the language a request names
   { q: "90s hindi romantic songs", expansionsInclude: "hindi 90s romantic songs" },
   { q: "enaku melody songs venum", expansionsInclude: "tamil melody songs" },
