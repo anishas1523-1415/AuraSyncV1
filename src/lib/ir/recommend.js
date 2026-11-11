@@ -2,7 +2,7 @@
 // Recommendations: what to play next and what to put in personal mixes.
 import { trackFeatures, classifyList } from "./classify.js";
 import { cosine, diversify, collapseDuplicates } from "./rank.js";
-import { getProfile, getIntent, getSession, isRejected, tasteClusters, favouriteTracks } from "./profile.js";
+import { getProfile, getIntent, getSession, isRejected, tasteClusters, favouriteTracks, seedWeight } from "./profile.js";
 import { timeOfDay } from "./context.js";
 import { regionalLanguages, regionalScore, trendScore, continuityScore, moodAffinity } from "./signals.js";
 
@@ -118,6 +118,26 @@ export function personalize(tracks, { count = 25, trending = null } = {}) {
   return diversify(scored, { lambda: 0.8, count, features: trackFeatures }).map((p) => p.track);
 }
 
+// ─── Charts (Trending, a language's chart): which chart songs this listener sees ───
+// Still the chart: songs are shown in chart rank order and higher-ranked songs are favoured, but among
+// the candidates, songs that fit the listener's taste and current mood win places, and songs they
+// keep rejecting are left out.
+export function pickChartSongs(candidates, count) {
+  const intent = getIntent();
+  const languages = regionalLanguages(getProfile());
+  const kept = candidates.filter((t) => !isRejected(t));
+  if (!intent || kept.length <= count) return kept.slice(0, count);
+  classifyList(kept);
+  return kept
+    .map((track, i) => ({
+      track,
+      score: 1 / (1 + i * 0.05) + 0.6 * cosine(intent, trackFeatures(track)) + 0.5 * regionalScore(track, languages),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count)
+    .map((p) => p.track);
+}
+
 // Which seeds of a category suit the listener: language-specific seeds follow their languages
 const SEED_LANGUAGES = ["tamil", "hindi", "telugu", "malayalam", "kannada", "english", "punjabi", "bollywood"];
 
@@ -134,8 +154,10 @@ export function pickSeeds(seeds, n) {
     // Their language: strongly preferred; a language they never play: rarely picked
     return fit > 0.05 ? 1.5 + fit * 4 : 0.25;
   };
+  // Seeds whose songs this listener played through come up more, ones they kept skipping less
+  const weight = (seed) => weightOf(seed) * seedWeight(seed);
   return seeds
-    .map((seed) => ({ seed, key: Math.pow(Math.random(), 1 / weightOf(seed)) }))
+    .map((seed) => ({ seed, key: Math.pow(Math.random(), 1 / weight(seed)) }))
     .sort((a, b) => b.key - a.key)
     .slice(0, n)
     .map((s) => s.seed);

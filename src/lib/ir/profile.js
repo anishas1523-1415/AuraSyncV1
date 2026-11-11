@@ -6,17 +6,28 @@
 import { trackFeatures } from "./classify.js";
 import { cosine } from "./rank.js";
 import { pushSessionEvent, sessionVector, intentVector } from "./context.js";
+import { analyzeQuery } from "./query.js";
 
 const KEY = "aurasynq_taste";
 const MAX_TRACKS = 400;
 const HALF_LIFE_DAYS = 21;
 const GAMMA = 0.6; // negatives count a bit less than positives (Rocchio's gamma < beta)
 
-// Feedback weights per event
-const WEIGHTS = { like: 3, unlike: -2, playlist: 2, complete: 1, play: 0.4, skip: -1 };
+// Feedback weights per event. Besides the obvious ones (like, playlist, played through, skipped):
+//   search_play  picked from search results: they went looking for it
+//   replay       played again (tapped again, restarted, or back within a day): a strong positive
+//   queue        added to the queue by hand
+//   lyrics       opened the lyrics while it played: engaged with the song
+//   quick_skip   skipped within the first seconds: a clear "not this"
+const WEIGHTS = {
+  like: 3, unlike: -2, playlist: 2, complete: 1, play: 0.4, skip: -1,
+  search_play: 1.2, replay: 1.5, queue: 1, lyrics: 0.6, quick_skip: -1.6,
+};
+const NEGATIVE = new Set(["skip", "quick_skip"]);
 
-let state = null; // { tracks: { id: { title, artist, f, pos, neg, at, skips, completes } }, radio: {...} }
+let state = null; // { tracks: { id: { title, artist, f, pos, neg, at, skips, completes, replays } }, radio, queries, seeds }
 let profileCache = null;
+let version = 0; // grows with every judgment: lists built before many new judgments are rebuilt
 
 const load = () => {
   if (state) return state;
@@ -36,6 +47,7 @@ export function subscribeTaste(fn) {
 
 const save = () => {
   profileCache = null;
+  version += 1;
   listeners.forEach((fn) => { try { fn(); } catch (e) {} });
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -45,8 +57,12 @@ const save = () => {
 
 const decay = (at) => Math.pow(0.5, (Date.now() - at) / (HALF_LIFE_DAYS * 86400000));
 
-// Record one feedback event for a song (kind: like | unlike | playlist | complete | play | skip)
-export function recordFeedback(track, kind) {
+// How many judgments have been recorded since the app started (lists use it to know when to refresh)
+export const tasteVersion = () => version;
+
+// Record one feedback event for a song (kind: see WEIGHTS). `scale` strengthens or weakens it, e.g.
+// by how long the song was listened to.
+export function recordFeedback(track, kind, { scale = 1 } = {}) {
   if (typeof window === "undefined" || !track?.id || !(kind in WEIGHTS)) return;
   const s = load();
   const entry = s.tracks[track.id] || {
@@ -56,11 +72,12 @@ export function recordFeedback(track, kind) {
   const fade = entry.at ? decay(entry.at) : 1;
   entry.pos *= fade;
   entry.neg *= fade;
-  const w = WEIGHTS[kind];
+  const w = WEIGHTS[kind] * scale;
   if (w > 0) entry.pos += w;
   else entry.neg += -w;
-  if (kind === "skip") entry.skips += 1;
+  if (NEGATIVE.has(kind)) entry.skips += 1;
   if (kind === "complete") entry.completes += 1;
+  if (kind === "replay") entry.replays = (entry.replays || 0) + 1;
   entry.at = Date.now();
   s.tracks[track.id] = entry;
 
@@ -71,11 +88,23 @@ export function recordFeedback(track, kind) {
   }
 
   // The listening session: what they are into right now
-  pushSessionEvent(s, { id: track.id, f: entry.f, w: WEIGHTS[kind], at: Date.now() });
+  pushSessionEvent(s, { id: track.id, f: entry.f, w, at: Date.now() });
 
   // Online evaluation of Aura Radio: precision = share of radio songs played through
-  if (track.source === "radio" && (kind === "complete" || kind === "skip")) {
+  if (track.source === "radio" && (kind === "complete" || NEGATIVE.has(kind))) {
     s.radio[kind === "complete" ? "played" : "skipped"] += 1;
+  }
+  // Which search behind a mix this song came from: mixes learn which of their searches this
+  // listener actually enjoys (see seedWeight)
+  if (track.seed && (kind === "complete" || kind === "play" || kind === "like" || NEGATIVE.has(kind))) {
+    s.seeds = s.seeds || {};
+    const stat = s.seeds[track.seed] || { pos: 0, neg: 0, at: 0 };
+    const fade2 = stat.at ? decay(stat.at) : 1;
+    stat.pos *= fade2;
+    stat.neg *= fade2;
+    if (w > 0) stat.pos += w; else stat.neg += -w;
+    stat.at = Date.now();
+    s.seeds[track.seed] = stat;
   }
   save();
 }
@@ -91,6 +120,54 @@ export function seedFromLibrary({ liked = [], history = [] }) {
   save();
 }
 
+// ─── Searches: what the listener asks for, even before they play anything ───
+// "sad tamil songs" says tamil + sad; a searched name says that artist. Kept as a small decaying
+// vector of features, added to the taste profile with a lower weight than actual listening.
+const SEARCH_WEIGHT = 0.35;
+export function recordSearch(raw) {
+  if (typeof window === "undefined" || !raw?.trim()) return;
+  const a = analyzeQuery(raw);
+  const features = [
+    ...(a.languages || []).map((l) => `lang:${l}`),
+    ...(a.moods || []).map((m) => `mood:${m}`),
+  ];
+  // A bare name ("anirudh", "sid sriram") is most likely an artist or a song: as an artist feature
+  // it only matters when songs by that artist exist, so a song title does no harm
+  if (a.entity && a.intent !== "album") features.push(`artist:${a.entity}`);
+  else if (a.intent === "song" && a.topic?.length && a.topic.length <= 3) features.push(`artist:${a.topic.join(" ")}`);
+  if (!features.length) return;
+  const s = load();
+  // "anirudh" -> "artist:anirudh ravichander" when songs by that artist were heard
+  const known = new Set(Object.values(s.tracks).flatMap((e) => Object.keys(e.f || {}).filter((k) => k.startsWith("artist:"))));
+  for (let i = 0; i < features.length; i++) {
+    if (!features[i].startsWith("artist:") || known.has(features[i])) continue;
+    const full = [...known].find((k) => k.startsWith(`${features[i]} `));
+    if (full) features[i] = full;
+  }
+  s.queries = s.queries || {};
+  const now = Date.now();
+  for (const k of new Set(features)) {
+    const q = s.queries[k] || { w: 0, at: now };
+    q.w = q.w * decay(q.at) + 1;
+    q.at = now;
+    s.queries[k] = q;
+  }
+  const keys = Object.keys(s.queries);
+  if (keys.length > 60) {
+    const strength = (k) => s.queries[k].w * decay(s.queries[k].at);
+    keys.sort((x, y) => strength(y) - strength(x)).slice(60).forEach((k) => delete s.queries[k]);
+  }
+  save();
+}
+
+// How much one of a mix's searches has worked for this listener (0.3 .. 3; 1 when unknown)
+export function seedWeight(seed) {
+  const stat = load().seeds?.[seed];
+  if (!stat) return 1;
+  const d = decay(stat.at);
+  return Math.max(0.3, Math.min(3, (1 + stat.pos * d) / (1 + stat.neg * d)));
+}
+
 // The Rocchio taste vector (sparse { feature: weight }), normalised
 export function getProfile() {
   if (typeof window === "undefined") return null;
@@ -102,6 +179,15 @@ export function getProfile() {
     const w = (entry.pos - GAMMA * entry.neg) * d;
     if (!w) continue;
     for (const [k, v] of Object.entries(entry.f || {})) vector[k] = (vector[k] || 0) + w * v;
+  }
+  // What they search for counts too, scaled to the listening part so it can't drown it out
+  const queries = Object.entries(s.queries || {});
+  if (queries.length) {
+    const listenNorm = Math.sqrt(Object.values(vector).reduce((n, v) => n + v * v, 0)) || 1;
+    const qNorm = Math.sqrt(queries.reduce((n, [, q]) => n + (q.w * decay(q.at)) ** 2, 0)) || 1;
+    for (const [k, q] of queries) {
+      vector[k] = (vector[k] || 0) + SEARCH_WEIGHT * listenNorm * (q.w * decay(q.at)) / qNorm;
+    }
   }
   const norm = Math.sqrt(Object.values(vector).reduce((n, v) => n + v * v, 0));
   if (!norm) return null;
@@ -126,6 +212,13 @@ export function getIntent() {
 // How well a song fits the listener (-1..1)
 export function affinity(track, profile = getProfile()) {
   return profile ? cosine(profile, trackFeatures(track)) : 0;
+}
+
+// When a song was last judged and whether the listener liked what they heard (null if never)
+export function lastJudged(id) {
+  if (typeof window === "undefined") return null;
+  const entry = load().tracks[id];
+  return entry ? { at: entry.at, positive: entry.pos > entry.neg } : null;
 }
 
 // Songs the listener keeps skipping and never finishes: keep them out of autoplay
@@ -203,7 +296,7 @@ export function tasteSummary() {
 }
 
 export function resetTaste() {
-  state = { tracks: {}, radio: { played: 0, skipped: 0 } };
+  state = { tracks: {}, radio: { played: 0, skipped: 0 }, queries: {}, seeds: {} };
   save();
 }
 
@@ -228,8 +321,16 @@ export function mergeTasteState(a, b) {
   if (ids.length > MAX_TRACKS) {
     ids.sort((x, y) => (tracks[y].at || 0) - (tracks[x].at || 0)).slice(MAX_TRACKS).forEach((id) => delete tracks[id]);
   }
+  // Searches and mix seeds: per key, the most recently updated wins
+  const newest = (x = {}, y = {}) => {
+    const out = { ...x };
+    for (const [k, v] of Object.entries(y)) if (!out[k] || (v.at || 0) > (out[k].at || 0)) out[k] = v;
+    return out;
+  };
   return {
     tracks,
+    queries: newest(A.queries, B.queries),
+    seeds: newest(A.seeds, B.seeds),
     radio: {
       played: Math.max(A.radio?.played || 0, B.radio?.played || 0),
       skipped: Math.max(A.radio?.skipped || 0, B.radio?.skipped || 0),
@@ -241,7 +342,7 @@ export function mergeTasteState(a, b) {
 export function exportTaste() {
   if (typeof window === "undefined") return { tracks: {}, radio: { played: 0, skipped: 0 }, seeded: false };
   const s = load();
-  return { tracks: s.tracks, radio: s.radio, seeded: !!s.seeded };
+  return { tracks: s.tracks, radio: s.radio, seeded: !!s.seeded, queries: s.queries || {}, seeds: s.seeds || {} };
 }
 
 export function applyTaste(merged) {
@@ -250,5 +351,7 @@ export function applyTaste(merged) {
   s.tracks = merged.tracks;
   s.radio = merged.radio;
   s.seeded = merged.seeded;
+  s.queries = merged.queries || {};
+  s.seeds = merged.seeds || {};
   save();
 }

@@ -11,6 +11,7 @@ import { existingYouTubeElement } from "@/lib/youtubeEmbed";
 import { useCloseOnBack } from "@/lib/backButton";
 import SyncButton from "@/components/SyncButton";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
+import { recordFeedback } from "@/lib/ir/profile";
 
 export default function Player() {
   const router = useRouter();
@@ -32,6 +33,14 @@ export default function Player() {
     media?.showIn(showLyrics || showQueue ? null : coverRef.current);
     return () => media?.showIn(null);
   }, [currentTrack?.id, showLyrics, showQueue]);
+  // Opening the lyrics is a sign of engagement with the song (counted once per song)
+  const lyricsJudgedRef = useRef(null);
+  useEffect(() => {
+    if (!showLyrics || !currentTrack?.id || lyricsJudgedRef.current === currentTrack.id) return;
+    lyricsJudgedRef.current = currentTrack.id;
+    recordFeedback(currentTrack, "lyrics");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLyrics, currentTrack?.id]);
   useCloseOnBack(showLyrics, () => setShowLyrics(false));
   useCloseOnBack(showQueue, () => setShowQueue(false));
 

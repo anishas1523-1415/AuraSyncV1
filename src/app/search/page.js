@@ -10,6 +10,7 @@ import { searchSongs, suggestQueries, localSuggestions, searchMoments, relatedSo
 import { voiceAvailable } from "@/lib/voice";
 import { Capacitor } from "@capacitor/core";
 import ListenOverlay from "@/components/ListenOverlay";
+import { recordFeedback, recordSearch } from "@/lib/ir/profile";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 // What the search box shows for hum and "something similar" results: a label, not a search
@@ -122,6 +123,7 @@ export default function Search() {
     const q = (searchQuery || query).trim();
     if (!q) return;
     saveRecent(q);
+    recordSearch(q); // what they ask for shapes their taste too
     runSearch(q);
   };
 
@@ -186,9 +188,10 @@ export default function Search() {
       if (!command.query) return;
       setQuery(command.query);
       saveRecent(command.query);
+      recordSearch(command.query);
       // The parsed words AND the whole sentence (searched as is, like YouTube's voice search)
       const tracks = await runSearch(command.query, { spoken: command.transcript });
-      if (command.action === "play" && tracks?.[0]) playTrack(tracks[0], [tracks[0]]);
+      if (command.action === "play" && tracks?.[0]) { recordFeedback(tracks[0], "search_play"); playTrack(tracks[0], [tracks[0]]); }
       if (command.action === "playlist") toast("Here are songs for your playlist. Tap + to add them");
     } catch (err) {
       toast(err?.message || "Voice search failed", { variant: "error" });
@@ -213,6 +216,8 @@ export default function Search() {
     }
     // Only the chosen song: when it ends, Aura Radio queues songs related to it (same mood,
     // artists, language), not other results that merely share words with the search
+    // Picked from search results: they went looking for it
+    if (query && !isResultLabel(query)) recordFeedback(track, "search_play");
     playTrack(track, [track]);
   };
 

@@ -3,8 +3,8 @@
 // reaction videos) and its radio for "more like this". In the Android app both run on the phone;
 // on the website, and as the app's fallback, through /api/search.
 import { apiUrl, isMobileApp } from "@/lib/api";
-import { getProfile, seedFromLibrary } from "@/lib/ir/profile";
-import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
+import { getProfile, seedFromLibrary, tasteVersion } from "@/lib/ir/profile";
+import { forYou, personalize, pickSeeds, pickChartSongs } from "@/lib/ir/recommend";
 import { regionalLanguages } from "@/lib/ir/signals";
 import { momentPicks } from "@/lib/ir/recommend";
 import { normalize } from "@/lib/ir/text";
@@ -146,11 +146,29 @@ export function localSuggestions(text) {
   return out;
 }
 
+// Re-orders YouTube Music's suggestions by the listener's taste: a suggestion naming one of their
+// artists, languages or moods moves up; the rest keep YouTube's order
+function rankSuggestions(list) {
+  const profile = getProfile();
+  if (!profile || list.length < 2) return list;
+  const terms = Object.entries(profile)
+    .filter(([k, v]) => v > 0.05 && /^(artist|lang|mood):/.test(k))
+    .map(([k, v]) => [k.slice(k.indexOf(":") + 1), v]);
+  const score = (text, i) => {
+    const t = normalize(text);
+    const fit = terms.reduce((n, [term, v]) => (term.length > 2 && t.includes(term) ? n + v : n), 0);
+    return fit - i * 0.02;
+  };
+  return list.map((s, i) => ({ s, k: score(typeof s === "string" ? s : s?.text || "", i) }))
+    .sort((a, b) => b.k - a.k)
+    .map((x) => x.s);
+}
+
 export async function suggestQueries(text) {
   const q = text.trim();
   if (!q) return [];
   const key = q.toLowerCase();
-  if (suggestCache.has(key)) return suggestCache.get(key);
+  if (suggestCache.has(key)) return rankSuggestions(suggestCache.get(key));
   let list = [];
   try {
     const music = await loadMusic();
@@ -160,7 +178,7 @@ export async function suggestQueries(text) {
   } catch (e) {}
   if (suggestCache.size > 200) suggestCache.clear();
   suggestCache.set(key, list);
-  return list;
+  return rankSuggestions(list);
 }
 
 // "For this moment" chips on the Search screen
@@ -269,7 +287,7 @@ export async function mixSongs(key, seeds, { count = 25, seedsPerMix = 2, fresh 
   const unused = seeds.filter((s) => !recentSeeds.includes(s));
   const chosen = pickSeeds(unused.length >= seedsPerMix ? unused : seeds, seedsPerMix);
   rememberSeeds(key, chosen);
-  const lists = await settledLists(chosen.map((seed) => seedSongs(seed, { fresh })));
+  const lists = (await settledLists(chosen.map((seed) => seedSongs(seed, { fresh }).then((list) => list.map((t) => ({ ...t, seed }))))));
   // Songs this list hasn't shown lately come first, so every round brings new ones
   const pool = preferUnseen(key, freshen(interleave(lists), count * 4), count * 2);
   const out = personalize(pool, { count, trending: trendingIds() });
@@ -300,15 +318,19 @@ function shownMap(key) {
   return Object.fromEntries(Object.entries(all[key] || {}).filter(([, at]) => now - at < SHOWN_TTL_MS));
 }
 
+// Reused within the hour, unless the listener has since told the app a lot (several plays, skips,
+// likes or searches): then the list is rebuilt for what they are into now
+const RELEARN_AFTER = 6;
 function recentList(key, fresh) {
   const last = lastLists.get(key);
-  return !fresh && last && Date.now() - last.at < REUSE_MS ? last.tracks : null;
+  if (fresh || !last || Date.now() - last.at >= REUSE_MS) return null;
+  return tasteVersion() - (last.version || 0) >= RELEARN_AFTER ? null : last.tracks;
 }
 
 // Records `tracks` as shown by list `key`, and returns them
 function showList(key, tracks) {
   if (!tracks?.length) return tracks;
-  lastLists.set(key, { at: Date.now(), tracks });
+  lastLists.set(key, { at: Date.now(), tracks, version: tasteVersion() });
   const all = readJSON(SHOWN_KEY, {});
   const mine = shownMap(key);
   const now = Date.now();
@@ -344,7 +366,9 @@ export async function chartPage(kind, count, { fresh = false } = {}) {
   const chart = await chartSongs(kind, { fresh: false });
   if (chart.length < count) return [];
   const rank = new Map(chart.map((t, i) => [t.id, i]));
-  return showList(key, preferUnseen(key, chart, count).sort((a, b) => rank.get(a.id) - rank.get(b.id)));
+  const candidates = preferUnseen(key, chart, Math.min(chart.length, Math.round(count * 1.6)))
+    .sort((a, b) => rank.get(a.id) - rank.get(b.id));
+  return showList(key, pickChartSongs(candidates, count).sort((a, b) => rank.get(a.id) - rank.get(b.id)));
 }
 
 // Personal mix: songs that the radios of the listener's favourites (from every side of their

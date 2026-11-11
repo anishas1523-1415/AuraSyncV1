@@ -7,7 +7,7 @@ import { tasteFromTotals } from "@/lib/activity";
 import { toast } from "@/lib/toast";
 import { apiUrl, isMobileApp } from "@/lib/api";
 import { relatedSongs, warmCatalog, trendingIds } from "@/lib/catalog";
-import { recordFeedback } from "@/lib/ir/profile";
+import { recordFeedback, lastJudged } from "@/lib/ir/profile";
 import { rankRadio, radioAnchor, mergeRadio, rerankUpcoming } from "@/lib/ir/recommend";
 import { getYouTubeElement } from "@/lib/youtubeEmbed";
 
@@ -352,6 +352,12 @@ export function AudioProvider({ children }) {
     commitQueue([...queueRef.current, track]);
     originalQueueRef.current = [...originalQueueRef.current, track];
   };
+  // "Add to queue" from a menu: the listener chose this song for later
+  const queueByListener = (track) => {
+    if (!track || queueRef.current.some(t => t.id === track.id)) return;
+    recordFeedback(track, "queue");
+    addToQueue(track);
+  };
 
   const toggleShuffle = () => {
     const nextShuffle = !isShuffleRef.current;
@@ -487,9 +493,10 @@ export function AudioProvider({ children }) {
     const heard = secondsHeardRef.current;
     const duration = durationRef.current || track.duration || 0;
     if (ended || (duration && heard >= duration * 0.7)) recordFeedback(track, "complete");
-    else if (heard >= 30) recordFeedback(track, "play");
+    // Listened a while without finishing: the longer, the stronger (up to 2x at 3 minutes)
+    else if (heard >= 30) recordFeedback(track, "play", { scale: Math.min(2, heard / 90) });
     else if (heard < Math.min(30, (duration || 120) * 0.4)) {
-      recordFeedback(track, "skip");
+      recordFeedback(track, heard < 10 ? "quick_skip" : "skip");
       reorderPendingRef.current = true; // what's still queued adapts to the skip
     }
     judgedRef.current = ended ? track.id : null;
@@ -527,12 +534,18 @@ export function AudioProvider({ children }) {
     const audio = audioRef.current;
 
     if (currentTrackRef.current?.id === track.id) {
+      if (newQueue || progressRef.current > 20) recordFeedback(track, "replay");
       seekTo(0);
       if (shouldAutoPlay) safePlay();
       return;
     }
 
     judgeListen();
+    // Picked from a list (not autoplay) and heard within the last day: they came back to it
+    if (newQueue) {
+      const last = lastJudged(track.id);
+      if (last && last.positive && Date.now() - last.at < 24 * 60 * 60 * 1000) recordFeedback(track, "replay");
+    }
     flushListenStats();
     clearStallTimer();
     recoveryRef.current = { trackId: null, attempts: 0, resumeAt: 0 };
@@ -818,6 +831,7 @@ export function AudioProvider({ children }) {
 
     // If progress is > 3 seconds, or it's the only track, restart the track
     if (progressRef.current > 3 || currentQ.length <= 1) {
+      if (progressRef.current > 20) recordFeedback(currentT, "replay");
       seekTo(0);
       return;
     }
@@ -993,6 +1007,7 @@ export function AudioProvider({ children }) {
   const toggleLikeTrack = (track) => {
     if (!track) return;
     recordFeedback(track, likedRef.current.some((t) => t.id === track.id) ? "unlike" : "like");
+    if (currentTrackRef.current?.id === track.id) reorderPendingRef.current = true;
     toggleLike(track);
   };
 
@@ -1321,7 +1336,7 @@ export function AudioProvider({ children }) {
 
   return (
     <AudioContext.Provider value={{
-      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue, isShuffle, toggleShuffle, syncUpNext,
+      currentTrack, isPlaying, isBuffering, playTrack, togglePlay, seekTo, playNext, playPrevious, stopAudio, playHistory, queue, setQueue, removeFromQueue, addToQueue: queueByListener, isShuffle, toggleShuffle, syncUpNext,
       likedTracks, toggleLikeTrack, isTrackLiked,
       customPlaylists, createPlaylist, deletePlaylist, renamePlaylist, addTrackToPlaylist, removeTrackFromPlaylist, toggleCollaborative,
       contextPlaylist, setContextPlaylist,
