@@ -77,6 +77,9 @@ const PRONOUN_LANGUAGE = Object.fromEntries(
 );
 // Words that show the text is a request for songs, not a song title
 const SONG_WORDS = new Set(["song", "songs", "music", "hits", "paatu", "paattu", "padal", "paadal", "gaane", "gaana"]);
+// "Song(s)" in Tamil, Malayalam and Hindi: read as "songs" in a request ("tamil pattu podu" ->
+// "tamil songs"), not as a name. Alone ("pattu") it stays a name: there's an artist called Pattu.
+const NATIVE_SONG = new Set(["pattu", "paatu", "paattu", "pattugal", "paatugal", "paadalgal", "padal", "paadal", "paatta", "gaane", "geet", "geeth"]);
 
 // "90s", "80's", "2000s", "1990s" -> an era
 const ERA = /^(19|20)?\d0s$/;
@@ -94,13 +97,16 @@ export function analyzeQuery(raw = "") {
   const variants = Object.keys(VARIANT_TERMS).filter((v) => VARIANT_TERMS[v].test(raw));
 
   // A request names a mood, activity, language, era or "songs"; a bare title does none of these
-  const isRequest = !!(moodWords.length || languages.length || era || allTokens.some((t) => SONG_WORDS.has(t)));
+  const nativeSong = allTokens.length > 1 && allTokens.some((t) => NATIVE_SONG.has(t));
+  const isRequest = !!(moodWords.length || languages.length || era || nativeSong || allTokens.some((t) => SONG_WORDS.has(t) && !NATIVE_SONG.has(t)));
   const asking = isRequest ? allTokens.filter((t) => REQUEST_LANGUAGE[t]) : [];
   // Pronouns go too, but only beside a real asking word ("naan ... kekanum", not "naan songs")
   const pronouns = asking.length ? allTokens.filter((t) => PRONOUN_LANGUAGE[t]) : [];
   const dropped = new Set([...asking, ...pronouns]);
   const requestWords = [...asking, ...pronouns];
-  const tokens = isRequest ? allTokens.filter((t) => !dropped.has(t)) : allTokens;
+  const tokens = isRequest
+    ? allTokens.filter((t) => !dropped.has(t)).map((t) => (nativeSong && NATIVE_SONG.has(t) ? "songs" : t))
+    : allTokens;
   // The language the listener typed in (Tanglish "enaku ... venum" -> tamil), not the language of the
   // songs they asked for: a hint, used only when the request and their taste name none
   const queryLanguage = requestWords.map((w) => REQUEST_LANGUAGE[w] || PRONOUN_LANGUAGE[w]).find((l) => l !== "english") || null;

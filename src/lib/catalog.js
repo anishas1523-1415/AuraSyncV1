@@ -175,9 +175,12 @@ async function lookup(onDevice, serverParams) {
 }
 
 // A listener's search: full relevance ranking, personalised by their taste profile
-export function searchSongs(query, { fresh = false } = {}) {
+// `spoken`: the whole sentence of a voice search, also searched as is (on the phone; the server
+// takes the parsed words only)
+export function searchSongs(query, { fresh = false, spoken = "" } = {}) {
   const q = query.trim();
-  return cached(`search:${q.toLowerCase()}`, () => lookup((m) => m.searchSongs(q, { profile: getProfile(), trending: trendingIds() }), { q }), fresh);
+  const key = `search:${q.toLowerCase()}${spoken ? `|${spoken.trim().toLowerCase()}` : ""}`;
+  return cached(key, () => lookup((m) => m.searchSongs(q, { profile: getProfile(), trending: trendingIds(), spoken }), { q }), fresh);
 }
 
 // Background searches behind mixes: plain song search, ranked by `personalize` afterwards

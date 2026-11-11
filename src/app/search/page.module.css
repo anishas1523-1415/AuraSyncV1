@@ -59,6 +59,22 @@
 
 .clearBtn:hover { background: rgba(255,255,255,0.2); color: white; }
 
+/* Voice search: sits where the clear button appears, in the search icon's colour */
+.micBtn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+
+.micBtn:hover, .micBtnActive { color: var(--primary-color); }
+
 .loadingBar {
   height: 2px;
   background: rgba(255,255,255,0.1);

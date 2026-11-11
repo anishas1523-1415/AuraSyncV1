@@ -1,12 +1,15 @@
 "use client";
 import styles from "./page.module.css";
-import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus, User, Sparkle } from "@phosphor-icons/react";
+import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus, User, Sparkle, Microphone } from "@phosphor-icons/react";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
 import AddToPlaylistModal from "@/components/AddToPlaylistModal";
 import { toast } from "@/lib/toast";
-import { searchSongs, suggestQueries, localSuggestions, searchMoments } from "@/lib/catalog";
+import { searchSongs, suggestQueries, localSuggestions, searchMoments, relatedSongs } from "@/lib/catalog";
+import { voiceAvailable } from "@/lib/voice";
+import { Capacitor } from "@capacitor/core";
+import ListenOverlay from "@/components/ListenOverlay";
 
 const RECENT_KEY = "aurasynq_recent_searches";
 
@@ -22,7 +25,15 @@ const genres = [
 ];
 
 export default function Search() {
-  const { playTrack } = useAudio();
+  const { playTrack, currentTrack } = useAudio();
+  const [canListen, setCanListen] = useState(false);
+  const [listenOpen, setListenOpen] = useState(false);
+  // Song (hum) search needs songs cached on the device, which only the Android app does
+  const [canHum, setCanHum] = useState(false);
+  useEffect(() => {
+    voiceAvailable().then(setCanListen).catch(() => setCanListen(false));
+    setCanHum(Capacitor.isNativePlatform());
+  }, []);
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -82,13 +93,14 @@ export default function Search() {
 
   // Shared by typing and Enter; only the newest request may update results (typing fast used
   // to let a slow, older response overwrite the latest one)
-  const runSearch = async (q) => {
+  const runSearch = async (q, { spoken = "" } = {}) => {
     const requestId = ++requestIdRef.current;
     lastSearchedRef.current = q;
     setLoading(true);
     try {
-      const tracks = await searchSongs(q);
+      const tracks = await searchSongs(q, { spoken });
       if (requestId === requestIdRef.current) setResults(tracks);
+      return requestId === requestIdRef.current ? tracks : null;
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       if (err.rateLimited) toast("Searching too fast — take a breath and try again", { variant: "error" });
@@ -125,7 +137,56 @@ export default function Search() {
   }, [query]);
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter") doSearch();
+    if (e.key !== "Enter") return;
+    // Hidden way into Hum Lab, the hum-recording tool (it has no link in the app's screens)
+    if (query.trim().toLowerCase() === "humlab") {
+      router.push("/humlab");
+      return;
+    }
+    doSearch();
+  };
+
+  // A hummed tune's matches go straight into the results list (best guesses when not sure)
+  const handleSongResults = (tracks, { guess = false } = {}) => {
+    setListenOpen(false);
+    const label = guess ? "Hummed tune · best guesses" : "Hummed tune";
+    lastSearchedRef.current = label; // a label, not a search: the typing search must skip it
+    requestIdRef.current++;
+    setQuery(label);
+    setResults(tracks);
+  };
+
+  // A spoken request runs through the same search as typing (ir/voice.js turns "play ...",
+  // "find that ... song", "something similar to this" into an action and search words)
+  const handleVoiceCommand = async (command) => {
+    setListenOpen(false);
+    try {
+      if (command.action === "similar") {
+        if (!currentTrack) {
+          toast("Play a song first, then ask for similar ones");
+          return;
+        }
+        const label = `Songs like ${currentTrack.title}`;
+        lastSearchedRef.current = label; // a label, not a search: the typing search must skip it
+        requestIdRef.current++;
+        setQuery(label);
+        setLoading(true);
+        setResults(await relatedSongs(currentTrack));
+        setLoading(false);
+        return;
+      }
+      if (!command.query) return;
+      setQuery(command.query);
+      saveRecent(command.query);
+      // The parsed words AND the whole sentence (searched as is, like YouTube's voice search)
+      const tracks = await runSearch(command.query, { spoken: command.transcript });
+      if (command.action === "play" && tracks?.[0]) playTrack(tracks[0], [tracks[0]]);
+      if (command.action === "playlist") toast("Here are songs for your playlist. Tap + to add them");
+    } catch (err) {
+      toast(err?.message || "Voice search failed", { variant: "error" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGenreClick = (genre) => {
@@ -166,6 +227,16 @@ export default function Search() {
           {query && (
             <button className={styles.clearBtn} onClick={() => { setQuery(""); setResults([]); inputRef.current?.focus(); }}>
               <X size={16} />
+            </button>
+          )}
+          {!query && canListen && (
+            <button
+              className={`${styles.micBtn} ${listenOpen ? styles.micBtnActive : ""}`}
+              onClick={() => setListenOpen(true)}
+              aria-label="Search by voice or song"
+              title="Search by voice or humming"
+            >
+              <Microphone size={20} weight={listenOpen ? "fill" : "regular"} />
             </button>
           )}
         </div>
@@ -279,11 +350,19 @@ export default function Search() {
       )}
 
       {activeModalTrack && (
-        <AddToPlaylistModal 
-          track={activeModalTrack} 
-          onClose={() => setActiveModalTrack(null)} 
+        <AddToPlaylistModal
+          track={activeModalTrack}
+          onClose={() => setActiveModalTrack(null)}
         />
       )}
+
+      <ListenOverlay
+        open={listenOpen}
+        canHum={canHum}
+        onClose={() => setListenOpen(false)}
+        onVoiceCommand={handleVoiceCommand}
+        onSongResults={handleSongResults}
+      />
     </div>
   );
 }

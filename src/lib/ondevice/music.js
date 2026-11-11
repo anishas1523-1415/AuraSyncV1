@@ -34,7 +34,7 @@ function getClient() {
 // Full relevance search (query understanding, film albums, artists, ranking, personal taste)
 const engine = createSearch(getClient);
 
-export async function searchSongs(query, { profile = null, trending = null, light = false } = {}) {
+export async function searchSongs(query, { profile = null, trending = null, light = false, spoken = "" } = {}) {
   // `light`: plain song search for background mixes, which don't need the extra lookups
   if (light) {
     const tracks = await searchMusicSongs(await getClient(), query);
@@ -43,7 +43,7 @@ export async function searchSongs(query, { profile = null, trending = null, ligh
     if (q.intent === "mood" && q.moods.length === 1) learnMoods(tracks.slice(0, 20), q.moods[0]);
     return tracks;
   }
-  return engine.search(query, { profile, trending });
+  return engine.search(query, { profile, trending, spoken });
 }
 
 export async function relatedSongs(videoId) {

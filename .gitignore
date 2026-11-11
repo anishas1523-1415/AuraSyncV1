@@ -63,3 +63,6 @@ infra/companion/.env
 # Mobile static build (npm run build:mobile)
 /.mobile-build-aside/
 scripts/library-e2e/.bundle.cjs
+
+# Hum search benchmark: recordings and exported indexes stay local
+/bench/

@@ -29,6 +29,12 @@ const CASES = [
   { q: "naan movie songs", intent: "album", entity: "naan" },
   { q: "naan songs", intent: "album_or_artist", entity: "naan" },
   { q: "main hoon na songs", intent: "album_or_artist", entity: "main hoon na" },
+  // "Song" in Tamil / Hindi reads as "songs" in a request (a real voice search: "tamil pattu podu"),
+  // but alone it stays a name (there's an artist called Pattu)
+  { q: "tamil pattu podu", intent: "mood", languages: ["tamil"], queryLanguage: "tamil", searchText: "tamil songs" },
+  { q: "ilaiyaraaja paatu venum", intent: "album_or_artist", entity: "ilaiyaraaja", searchText: "ilaiyaraaja songs" },
+  { q: "sad pattu", intent: "mood", moods: ["sad"], searchText: "sad songs" },
+  { q: "pattu", intent: "song_or_artist", entity: "pattu", searchText: "pattu" },
   // Mood expansions carry the era and the language a request names
   { q: "90s hindi romantic songs", expansionsInclude: "hindi 90s romantic songs" },
   { q: "enaku melody songs venum", expansionsInclude: "tamil melody songs" },

@@ -111,7 +111,10 @@ export function createSearch(getClient) {
     }
   }
 
-  async function search(raw, { profile = null, trending = null } = {}) {
+  // `spoken`: the whole sentence a voice search heard ("play that song from leo where vijay
+  // dances"). It's also sent to YouTube Music as is, the way YouTube's own voice search works, and
+  // what YouTube Music finds for it is trusted rather than filtered for word overlap.
+  async function search(raw, { profile = null, trending = null, spoken = "" } = {}) {
     const q = analyzeQuery(raw);
     if (!q.text) return [];
     const safe = (p) => p.catch(() => null);
@@ -128,6 +131,8 @@ export function createSearch(getClient) {
       mainQuery = `${languages[0]} ${mainQuery}`;
     }
     const songsPromise = safe(songSearch(mainQuery));
+    const sentence = String(spoken || "").trim();
+    const spokenPromise = sentence && normalize(sentence) !== normalize(mainQuery) ? safe(songSearch(sentence)) : Promise.resolve(null);
     // A name plus a mood ("ilaiyaraaja melody", "vijay songs for gym"): also search the name with
     // each mood ("vijay gym songs"); used only if the name turns out to be an artist or a film
     const nameMood = q.intent === "album_or_artist" && q.bases.length && q.entity;
@@ -154,7 +159,9 @@ export function createSearch(getClient) {
     // "arabic kuthu" is a title that happens to contain a mood word: treat it as a song search
     const intent = titledLikeQuery && q.intent === "album_or_artist" ? "song" : q.intent;
 
+    const spokenTracks = await spokenPromise;
     const lists = [{ tracks: songs || [], weight: 1 }];
+    if (spokenTracks?.length) lists.push({ tracks: spokenTracks, weight: 0.8 });
     if (album?.length) lists.push({ tracks: album, weight: 1.6 });
     if (artist?.tracks?.length) lists.push({ tracks: artist.tracks, weight: 1.2 });
     // (Mood expansions run only for mood requests, name + mood searches only for name requests)
@@ -165,7 +172,10 @@ export function createSearch(getClient) {
     });
 
     const moods = intent === "song" ? [] : q.moods;
-    const ctx = { profile, album, artist, trending, moods, languageHint: q.queryLanguage };
+    // YouTube Music's own answers to the spoken sentence, by rank
+    // (only the top few: further down, YouTube's answers to a long sentence get noisy)
+    const trusted = new Map((spokenTracks || []).slice(0, 3).map((t, i) => [t.id, i]));
+    const ctx = { profile, album, artist, trending, moods, languageHint: q.queryLanguage, trusted };
     let ranked = score([q], reciprocalRankFusion(lists), ctx);
 
     // Weak matches: try YouTube Music's spelling suggestion ("vathi comming" -> "vaathi coming")
@@ -206,7 +216,7 @@ export function createSearch(getClient) {
 
   // Final relevance score for every fused candidate (`queries`: the typed query and, if any, its
   // spelling correction; each signal takes the better of the two)
-  function score(queries, fused, { profile, album, artist, trending, moods = [], languageHint = null }) {
+  function score(queries, fused, { profile, album, artist, trending, moods = [], languageHint = null, trusted = new Map() }) {
     const q = queries[0];
     const learned = regionalLanguages(profile);
     // The typing language ("enaku ... venum") leads when the listener's taste names no language yet
@@ -243,6 +253,11 @@ export function createSearch(getClient) {
         if (mood && moods.includes(mood)) s += 0.1;
       }
       if (q.intent === "mood") boosted = true; // every mood result is "about" the request
+      // A spoken sentence: YouTube Music's top answers to it count, whatever words they share
+      if (trusted.has(track.id)) {
+        s += 0.25 / (1 + trusted.get(track.id) * 0.5);
+        boosted = true;
+      }
       if (profile) s += 0.15 * cosine(profile, trackFeatures(track));
       // No language asked: lean toward the listener's region and what's trending (tie-breakers)
       if (!q.languages.length) s += 0.5 * regionalScore(track, regional);

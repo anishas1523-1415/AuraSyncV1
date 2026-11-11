@@ -15,6 +15,7 @@ const REQUESTS = [
   { q: "90s Hindi romantic songs", lang: "hindi" },
   { q: "mujhe sad songs sunao", lang: "hindi" },
   { q: "naan sad songs kekanum", lang: "tamil" },
+  { q: "tamil pattu podu", lang: "tamil" }, // a real voice search from the phone
   { q: "Ilayaraja old love songs", artist: /ilaiyaraaja|ilayaraja|ilaiyaraja/i },
   { q: "Vijay songs for gym", artist: /\bvijay\b/i },
   { q: "sid sriram melody", artist: /sid sriram/i },

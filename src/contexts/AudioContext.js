@@ -289,6 +289,8 @@ export function AudioProvider({ children }) {
     // Start the phone's YouTube session (BotGuard) and music lookups early so the first tap is faster
     loadOnDevice().then((ondevice) => ondevice?.warmUp());
     warmCatalog();
+    // Hum search: index songs already on the device (downloads, recently played), in the background
+    import("@/lib/melody/index").then((m) => m.backfillMelodyIndex()).catch(() => {});
   }, []);
 
   // Back online: retry the song that stopped because the connection dropped
@@ -978,6 +980,8 @@ export function AudioProvider({ children }) {
         }
       }
       writeStored(AUTO_CACHE_KEY, list);
+      // Hum search: this song's melody is indexed on the device from the copy just cached
+      import("@/lib/melody/index").then((m) => m.indexMelodyLater(track, downloadedBlob)).catch(() => {});
     } catch (e) {
       cachedIdsRef.current.delete(trackId);
       console.warn("Background caching failed", e);
