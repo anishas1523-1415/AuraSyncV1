@@ -12,6 +12,8 @@ import { Capacitor } from "@capacitor/core";
 import ListenOverlay from "@/components/ListenOverlay";
 
 const RECENT_KEY = "aurasynq_recent_searches";
+// What the search box shows for hum and "something similar" results: a label, not a search
+const isResultLabel = (text) => /^(Hummed tune|Songs like )/.test(String(text || ""));
 
 const genres = [
   { name: "Pop", slug: "pop", gradient: "linear-gradient(135deg, #FF416C 0%, #FF4B2B 100%)", shadowColor: "rgba(255, 65, 108, 0.5)", image: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" },
@@ -68,7 +70,13 @@ export default function Search() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(RECENT_KEY);
-      if (stored) setRecentSearches(JSON.parse(stored));
+      // (labels saved by an earlier version are dropped)
+      if (stored) {
+        const all = JSON.parse(stored);
+        const clean = all.filter((s) => !isResultLabel(s));
+        if (clean.length !== all.length) localStorage.setItem(RECENT_KEY, JSON.stringify(clean));
+        setRecentSearches(clean);
+      }
     } catch (e) {}
   }, []);
 
@@ -199,7 +207,8 @@ export default function Search() {
   };
 
   const handlePlayTrack = (track, trackList) => {
-    if (query) {
+    // Labels of hum / "songs like" results are not searches: they don’t go into recents
+    if (query && !isResultLabel(query)) {
       saveRecent(query);
     }
     // Only the chosen song: when it ends, Aura Radio queues songs related to it (same mood,
