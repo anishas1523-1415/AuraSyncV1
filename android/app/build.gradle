@@ -34,8 +34,19 @@ android {
     buildTypes {
         release {
             if (keystorePropsFile.exists()) signingConfig signingConfigs.release
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // R8: removes unused library code and resources (the app's own code and UI are untouched)
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        // Shrunk exactly like release, but signed with the debug key and debuggable: installs over a
+        // debug build without wiping app data, to test the shrunk app on a phone
+        qa {
+            initWith debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            matchingFallbacks = ['debug']
         }
     }
 }

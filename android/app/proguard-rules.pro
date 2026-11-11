@@ -1,21 +1,23 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# AuraSynq release shrinking (R8). Capacitor's own rules (shipped with @capacitor/android) already
+# keep every plugin class and its @PluginMethod methods; Firebase / Google libraries ship theirs.
+# The rules below are belt-and-braces for things looked up by name at runtime.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Methods the WebView calls from JavaScript
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Capacitor's bridge finds plugins and their callbacks by annotation and reflection
+-keep class com.getcapacitor.** { *; }
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod, Exceptions
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# This app's own classes (MainActivity and anything declared in the manifest)
+-keep class com.aurasynq.app.** { *; }
+
+# Keep crash stack traces readable (line numbers), without keeping source file names public
+-keepattributes LineNumberTable
+-renamesourcefileattribute SourceFile
+
+# The Firebase sign-in plugin has optional Facebook login code; the Facebook SDK isn't part of this
+# app (no Facebook login), so its classes are absent on purpose
+-dontwarn com.facebook.**
