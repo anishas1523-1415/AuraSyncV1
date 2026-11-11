@@ -66,3 +66,6 @@ scripts/library-e2e/.bundle.cjs
 
 # Hum search benchmark: recordings and exported indexes stay local
 /bench/
+
+# firebase cache
+/.firebase/
