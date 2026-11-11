@@ -1,0 +1,44 @@
+# Tunes hum search every night on the shared Hum Lab dataset (scripts/hum-train.mjs).
+# Publishes public/hum-params.json to main only when the new settings beat the current ones on
+# held-out takes; the website deploys it and the app picks it up within a day.
+# Needs the repository secret SUPABASE_SERVICE_KEY (the hum dataset project's service_role key).
+name: Hum search training
+
+on:
+  schedule:
+    - cron: "30 21 * * *" # 03:00 India time
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hum-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tune on the dataset
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scripts/hum-train.mjs
+      - name: Publish better settings
+        run: |
+          if git diff --quiet -- public/hum-params.json; then
+            echo "No change to publish"
+            exit 0
+          fi
+          git config user.name "aurasynq-hum-train"
+          git config user.email "aurasynq-hum-train@users.noreply.github.com"
+          git add public/hum-params.json
+          git commit -m "chore(hum): settings tuned on the Hum Lab dataset"
+          git push origin HEAD:main

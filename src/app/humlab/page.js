@@ -11,6 +11,7 @@ import { toast } from "@/lib/toast";
 import { classifyTrack } from "@/lib/ir/classify";
 import { TAKE_KINDS, TAKE_SR, encodeWav, saveTake, listTakes, deleteTake, clearTakes, exportTakes } from "@/lib/melody/humlab";
 import { SUGGESTED_SONGS } from "@/lib/melody/humlabSongs";
+import { CONSENT_VERSION, shareTakes, forgetShared } from "@/lib/melody/humshare";
 import styles from "./page.module.css";
 
 const PROFILE_KEY = "aurasynq_humlab_profile";
@@ -43,9 +44,12 @@ export default function HumLab() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
-      if (saved?.consent) { setProfile(saved); setStep("song"); }
+      if (saved?.consent && (saved.consentVersion || 1) >= CONSENT_VERSION) { setProfile(saved); setStep("song"); }
+      else if (saved) setProfile({ ...saved, consent: false });
     } catch (e) {}
     listTakes().then(setTakes).catch(() => {});
+    // Takes not shared yet (recorded offline, or before agreeing to share) go up now
+    shareTakes().then(({ shared }) => { if (shared) listTakes().then(setTakes); }).catch(() => {});
   }, []);
 
   // Suggested songs, resolved on YouTube Music when the song step opens
@@ -171,6 +175,9 @@ export default function HumLab() {
     setPending(null);
     setTakes(await listTakes());
     setMessage("Saved");
+    shareTakes().then(async ({ shared }) => {
+      if (shared) { setTakes(await listTakes()); setMessage("Saved and shared. Thank you!"); }
+    }).catch(() => {});
   };
 
   const kindsDone = new Set(takes.filter((t) => t.label.songId === song?.id && t.label.segmentStart === start).map((t) => t.label.kind));
@@ -192,12 +199,17 @@ export default function HumLab() {
           <h2>Help AuraSynq learn to recognise hums</h2>
           <p>You'll listen to a short part of a song, then hum, whistle or sing it back a few different ways. Each recording is about 15 seconds.</p>
           <ul>
-            <li>Recordings are saved <b>only on this device</b>. Nothing is uploaded.</li>
-            <li>You choose when to export them and who to send them to.</li>
-            <li>They're used only to test and improve AuraSynq's hum search.</li>
-            <li>You can delete any recording, or all of them, at any time.</li>
+            <li>Your recordings, and the tune traced from them, are <b>shared with AuraSynq's hum dataset</b> automatically, including any already on this phone.</li>
+            <li>No account, name or email is attached. Your optional alias and voice type are.</li>
+            <li>They're used only to train and test AuraSynq's hum search.</li>
+            <li>Deleting a recording here also removes it from the dataset.</li>
           </ul>
-          <button className={styles.primary} onClick={() => setStep("about")}>I agree, let's start</button>
+          <button className={styles.primary} onClick={() => {
+            const agreed = { ...profile, consent: true, consentVersion: CONSENT_VERSION };
+            saveProfile(agreed);
+            setStep(profile.participant || profile.voice ? "song" : "about");
+            shareTakes().then(async ({ shared }) => { if (shared) setTakes(await listTakes()); }).catch(() => {});
+          }}>I agree, let's start</button>
         </section>
       )}
 
@@ -216,7 +228,7 @@ export default function HumLab() {
               ))}
             </div>
           </div>
-          <button className={styles.primary} onClick={() => { saveProfile({ ...profile, consent: true }); setStep("song"); }}>Continue</button>
+          <button className={styles.primary} onClick={() => { saveProfile({ ...profile, consent: true, consentVersion: CONSENT_VERSION }); setStep("song"); }}>Continue</button>
         </section>
       )}
 
@@ -296,11 +308,20 @@ export default function HumLab() {
 
       {step !== "consent" && step !== "about" && takes.length > 0 && (
         <section className={`glass ${styles.card}`}>
-          <h3>Your takes ({takes.length})</h3>
+          <h3>Your takes ({takes.length}) · {takes.filter((t) => t.sharedAt).length} shared</h3>
           {takes.slice(-6).reverse().map((t) => (
             <div key={t.id} className={styles.takeRow}>
               <span>{t.label.title?.slice(0, 26)} · {t.label.kind} · {fmt(t.label.segmentStart)}</span>
-              <button className={styles.iconBtn} onClick={async () => { await deleteTake(t.id); setTakes(await listTakes()); }} aria-label="Delete take"><Trash size={16} /></button>
+              <button className={styles.iconBtn} onClick={async () => {
+                try {
+                  if (t.sharedAt) await forgetShared(t.id);
+                } catch (err) {
+                  toast("Couldn't remove it from the dataset. Check your connection and try again", { variant: "error" });
+                  return;
+                }
+                await deleteTake(t.id);
+                setTakes(await listTakes());
+              }} aria-label="Delete take"><Trash size={16} /></button>
             </div>
           ))}
           <div className={styles.row}>
@@ -314,7 +335,17 @@ export default function HumLab() {
             }}>
               <DownloadSimple size={18} /> Export all
             </button>
-            <button className={styles.danger} onClick={async () => { if (confirm("Delete all takes on this device?")) { await clearTakes(); setTakes([]); } }}>Delete all</button>
+            <button className={styles.danger} onClick={async () => {
+              if (!confirm("Delete all your takes, on this phone and in the dataset?")) return;
+              try {
+                if (takes.some((t) => t.sharedAt)) await forgetShared();
+              } catch (err) {
+                toast("Couldn't remove them from the dataset. Check your connection and try again", { variant: "error" });
+                return;
+              }
+              await clearTakes();
+              setTakes([]);
+            }}>Delete all</button>
           </div>
         </section>
       )}

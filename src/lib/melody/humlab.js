@@ -1,8 +1,8 @@
 "use client";
 // Hum Lab: collecting labelled hums for the hum search dataset (see docs/HUM_SEARCH_ARCHITECTURE.md §9).
 // Each take is a short recording of someone humming / whistling / singing a known part of a known
-// song. Takes are kept on this device (IndexedDB) until the participant exports them: nothing is
-// uploaded anywhere by this module.
+// song. Takes are kept on this device (IndexedDB); with the participant's consent they are also
+// shared with the hum dataset by humshare.js. Export gives the participant their own copy.
 
 const DB_NAME = "aurasynq_humlab";
 const STORE = "takes";

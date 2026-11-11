@@ -1,0 +1,5 @@
+{
+  "params": { "maxCost": 0.65, "minZ": 3, "coarseKeep": 60, "perSong": 3, "guessMaxCost": 0.65 },
+  "tunedAt": null,
+  "note": "Hum search settings. Written by scripts/hum-train.mjs only when new settings beat these on held-back hums."
+}

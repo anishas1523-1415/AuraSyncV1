@@ -10,6 +10,7 @@ import { readStored } from "@/lib/storage";
 import { contourToBase64, contourFromBase64, unpackContour, queryContour } from "./contour.js";
 import { trackHum } from "./pitch.js";
 import { searchMelody } from "./match.js";
+import { humParams } from "./params.js";
 
 const DB_NAME = "aurasynq_melody";
 const STORE = "refs";
@@ -59,6 +60,12 @@ async function allRefs() {
     contour: unpackContour(contourFromBase64(r.contour)),
   }));
   return refsCache;
+}
+
+// The stored outline of one song (packed, base64), or null if this phone hasn't learned it
+export async function referenceOutline(id) {
+  const row = await tx("readonly", (s) => s.get(id));
+  return row && row.v === VERSION && row.contour ? row.contour : null;
 }
 
 export async function melodyIndexStats() {
@@ -262,7 +269,6 @@ const KEEP_HUMS = 5;
 // not clearly ahead of the rest), so like Google's hum search the closest songs are offered as
 // best guesses rather than answering "no match".
 const GUESSES = 3;
-const GUESS_MAX_COST = 0.65;
 
 // samples: Float32Array at 16 kHz. Resolves to { tracks, guess, reason, ms, indexed }:
 // guess = true when tracks are best guesses rather than a confident match
@@ -271,10 +277,11 @@ export async function humSearch(samples) {
   const refs = await allRefs();
   if (!refs.length) return { tracks: [], guess: false, reason: "empty-index", ms: 0, indexed: 0 };
   const query = queryContour(trackHum(samples, SR));
-  const res = searchMelody(query, refs);
+  const { guessMaxCost, ...settings } = await humParams(); // tuned on the shared Hum Lab dataset
+  const res = searchMelody(query, refs, settings);
   const byId = new Map(refs.map((r) => [r.id, r.track]));
   const confident = res.matches.length > 0;
-  const guessable = !confident && res.reason === "ambiguous" ? (res.closest || []).filter((m) => m.cost <= GUESS_MAX_COST).slice(0, GUESSES) : [];
+  const guessable = !confident && res.reason === "ambiguous" ? (res.closest || []).filter((m) => m.cost <= guessMaxCost).slice(0, GUESSES) : [];
   const tracks = (confident ? res.matches : guessable)
     .map((m) => ({ ...byId.get(m.id), matchConfidence: m.confidence, matchAt: m.at }))
     .filter((t) => t.id);
