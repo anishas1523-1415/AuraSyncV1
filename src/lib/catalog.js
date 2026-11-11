@@ -40,7 +40,6 @@ const persistCache = () => {
     } catch (e) {}
   }, 500);
 };
-const lastSeeds = new Map(); // mix key -> seeds used last time
 
 let musicPromise = null;
 const loadMusic = () => {
@@ -83,11 +82,15 @@ const country = () => {
 
 // Official YouTube Music charts: kind "now" (trending in the country, leaning toward the
 // listener's languages) or a language ("tamil"). Phone first, the server as fallback.
+// On the phone the chart pool is ~80 songs (the server route returns 40), so chart pages can keep
+// changing from one Sync to the next
+const CHART_POOL = 80;
+
 export function chartSongs(kind, { fresh = false } = {}) {
   const languages = regionalLanguages(getProfile());
-  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}`;
+  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}:${CHART_POOL}`;
   return cached(key, () => lookup(
-    (m) => m.chartSongs(kind, { country: country(), languages }),
+    (m) => m.chartSongs(kind, { country: country(), languages, count: CHART_POOL }),
     { chart: kind, country: country(), langs: languages.join(",") },
   ), fresh);
 }
@@ -115,10 +118,16 @@ export function trendingIds() {
 // (instant, no network), then YouTube Music's suggestions for it.
 const suggestCache = new Map();
 
+// App tools that typing can reach: "h", "hum", "hum l…" suggests Hum Lab (it has no other link)
+const TOOLS = [{ text: "Hum Lab", names: ["humlab", "hum lab"], href: "/humlab" }];
+
 export function localSuggestions(text) {
   const q = normalize(text);
   if (!q || typeof window === "undefined") return [];
   const out = [];
+  for (const tool of TOOLS) {
+    if (tool.names.some((n) => n.startsWith(q))) out.push({ text: tool.text, kind: "tool", href: tool.href });
+  }
   try {
     JSON.parse(localStorage.getItem("aurasynq_recent_searches") || "[]")
       .filter((s) => normalize(s).startsWith(q) && normalize(s) !== q)
@@ -249,22 +258,102 @@ const settledLists = async (promises) => {
 // A mix from a few of `seeds` (avoiding last time's), preferring the listener's languages, then
 // ranked by how well each song fits them, with a little variety
 export async function mixSongs(key, seeds, { count = 25, seedsPerMix = 2, fresh = false } = {}) {
-  const previous = lastSeeds.get(key) || [];
-  const unused = seeds.filter((s) => !previous.includes(s));
+  const reuse = recentList(key, fresh);
+  if (reuse) return reuse;
+  // Seeds not used in the last two rounds (remembered across restarts), when there are enough
+  const recentSeeds = seedHistory(key).slice(-2).flat();
+  const unused = seeds.filter((s) => !recentSeeds.includes(s));
   const chosen = pickSeeds(unused.length >= seedsPerMix ? unused : seeds, seedsPerMix);
-  lastSeeds.set(key, chosen);
+  rememberSeeds(key, chosen);
   const lists = await settledLists(chosen.map((seed) => seedSongs(seed, { fresh })));
-  return personalize(freshen(interleave(lists), count * 2), { count, trending: trendingIds() });
+  // Songs this list hasn't shown lately come first, so every round brings new ones
+  const pool = preferUnseen(key, freshen(interleave(lists), count * 4), count * 2);
+  const out = personalize(pool, { count, trending: trendingIds() });
+  return showList(key, out);
+}
+
+// ─── Variety: what each list has shown, and which seeds it used ───
+// Remembered on the device so a list doesn't come back to the same songs after a sync or a restart.
+// Opening a list again within a few minutes shows the same songs (no jumping while browsing);
+// Sync always brings a new set.
+const SHOWN_KEY = "aurasynq_shown_v1";
+const SEEDS_KEY = "aurasynq_seed_history_v1";
+const SHOWN_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const SHOWN_MAX = 300; // per list
+const REUSE_MS = 10 * 60 * 1000;
+const lastLists = new Map(); // key -> { at, tracks }: the list as last shown in this session
+
+const readJSON = (k, fallback) => {
+  try { return JSON.parse(localStorage.getItem(k) || "null") || fallback; } catch (e) { return fallback; }
+};
+const writeJSON = (k, v) => {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+};
+
+function shownMap(key) {
+  const all = readJSON(SHOWN_KEY, {});
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(all[key] || {}).filter(([, at]) => now - at < SHOWN_TTL_MS));
+}
+
+function recentList(key, fresh) {
+  const last = lastLists.get(key);
+  return !fresh && last && Date.now() - last.at < REUSE_MS ? last.tracks : null;
+}
+
+// Records `tracks` as shown by list `key`, and returns them
+function showList(key, tracks) {
+  if (!tracks?.length) return tracks;
+  lastLists.set(key, { at: Date.now(), tracks });
+  const all = readJSON(SHOWN_KEY, {});
+  const mine = shownMap(key);
+  const now = Date.now();
+  tracks.forEach((t) => { if (t?.id) mine[t.id] = now; });
+  all[key] = Object.fromEntries(Object.entries(mine).sort((a, b) => b[1] - a[1]).slice(0, SHOWN_MAX));
+  writeJSON(SHOWN_KEY, all);
+  return tracks;
+}
+
+// `want` songs: never-shown ones first (in their own order), then the longest-unseen
+function preferUnseen(key, tracks, want) {
+  const shown = shownMap(key);
+  const unseen = tracks.filter((t) => !shown[t.id]);
+  if (unseen.length >= want) return unseen.slice(0, want);
+  const seen = tracks.filter((t) => shown[t.id]).sort((a, b) => shown[a.id] - shown[b.id]);
+  return [...unseen, ...seen].slice(0, want);
+}
+
+const seedHistory = (key) => readJSON(SEEDS_KEY, {})[key] || [];
+function rememberSeeds(key, chosen) {
+  const all = readJSON(SEEDS_KEY, {});
+  all[key] = [...(all[key] || []), chosen].slice(-4);
+  writeJSON(SEEDS_KEY, all);
+}
+
+// A page of a chart (Trending, a language's chart): each Sync shows the chart songs this list
+// showed longest ago (never-shown first), shuffled; opening again within minutes shows the same.
+// On the phone the chart pool is ~80 songs (the server's is 40), so pages keep changing.
+export async function chartPage(kind, count, { fresh = false } = {}) {
+  const key = `chartpage:${kind}`;
+  const reuse = recentList(key, fresh);
+  if (reuse) return reuse;
+  const chart = await chartSongs(kind, { fresh: false });
+  if (chart.length < count) return [];
+  return showList(key, shuffle(preferUnseen(key, chart, count)));
 }
 
 // Personal mix: songs that the radios of the listener's favourites (from every side of their
 // taste) agree on, ranked by fit (see recommend.forYou)
 export async function forYouSongs({ history = [], liked = [], fallbackSeeds = [], count = 25, fresh = false }) {
+  const key = `foryou:${count}`;
+  const reuse = recentList(key, fresh);
+  if (reuse) return reuse;
   seedFromLibrary({ liked, history });
   const list = await forYou((track) => relatedSongs(track, { fresh }), {
-    count: count * 2,
+    count: count * 4,
     recent: recentlyPlayedIds(),
-    fallback: () => mixSongs("foryou", fallbackSeeds, { count, fresh }),
+    fallback: () => mixSongs("foryou", fallbackSeeds, { count: count * 2, fresh }),
   });
-  return freshen(list, count);
+  // Songs this list hasn't shown lately first, so each round brings new picks
+  return showList(key, preferUnseen(key, freshen(list, count * 4), count));
 }

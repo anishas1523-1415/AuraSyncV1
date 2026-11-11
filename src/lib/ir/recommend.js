@@ -121,17 +121,24 @@ export function personalize(tracks, { count = 25, trending = null } = {}) {
 // Which seeds of a category suit the listener: language-specific seeds follow their languages
 const SEED_LANGUAGES = ["tamil", "hindi", "telugu", "malayalam", "kannada", "english", "punjabi", "bollywood"];
 
+// Weighted random sampling without replacement (Efraimidis–Spirakis: key = u^(1/w)): a seed's
+// chance follows its weight, but every seed can come up. Sorting by weight plus a little noise
+// (as before) picked the same top seeds nearly every time, so mixes kept repeating.
 export function pickSeeds(seeds, n) {
   const profile = getProfile();
   const weightOf = (seed) => {
     const named = SEED_LANGUAGES.find((l) => seed.toLowerCase().includes(l));
-    if (!profile || !named) return 1 + Math.random();
+    if (!profile || !named) return 1;
     const lang = named === "bollywood" ? "hindi" : named;
     const fit = profile[`lang:${lang}`] || 0;
     // Their language: strongly preferred; a language they never play: rarely picked
-    return (fit > 0.05 ? 1.5 + fit * 4 : 0.4) + Math.random();
+    return fit > 0.05 ? 1.5 + fit * 4 : 0.25;
   };
-  return [...seeds].sort((a, b) => weightOf(b) - weightOf(a)).slice(0, n);
+  return seeds
+    .map((seed) => ({ seed, key: Math.pow(Math.random(), 1 / weightOf(seed)) }))
+    .sort((a, b) => b.key - a.key)
+    .slice(0, n)
+    .map((s) => s.seed);
 }
 
 function shuffleInPlace(list) {

@@ -1,6 +1,6 @@
 "use client";
 import styles from "./page.module.css";
-import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus, User, Sparkle, Microphone } from "@phosphor-icons/react";
+import { MagnifyingGlass, Play, ClockCounterClockwise, X, Plus, User, Sparkle, Microphone, Waveform } from "@phosphor-icons/react";
 import { useState, useEffect, useRef } from "react";
 import { useAudio } from "@/contexts/AudioContext";
 import { useRouter } from "next/navigation";
@@ -249,9 +249,16 @@ export default function Search() {
               key={`${s.kind}-${s.text}`}
               className={styles.suggestion}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setQuery(s.text); setFocused(false); inputRef.current?.blur(); doSearch(s.text); }}
+              onClick={() => {
+                setFocused(false);
+                inputRef.current?.blur();
+                // A tool (Hum Lab) opens its page; anything else is searched
+                if (s.kind === "tool") { router.push(s.href); return; }
+                setQuery(s.text);
+                doSearch(s.text);
+              }}
             >
-              {s.kind === "recent" ? <ClockCounterClockwise size={16} /> : s.kind === "artist" ? <User size={16} /> : <MagnifyingGlass size={16} />}
+              {s.kind === "tool" ? <Waveform size={16} /> : s.kind === "recent" ? <ClockCounterClockwise size={16} /> : s.kind === "artist" ? <User size={16} /> : <MagnifyingGlass size={16} />}
               <span>{s.text}</span>
             </div>
           ))}

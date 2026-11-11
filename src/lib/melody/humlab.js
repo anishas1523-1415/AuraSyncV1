@@ -79,10 +79,61 @@ export function takeFileName(label, n) {
   return `${label.songId}__${Math.round(label.segmentStart)}-${Math.round(label.segmentEnd)}__${label.kind}__${safe(label.participant)}__${n}`;
 }
 
-// Downloads every take (WAV + JSON label) and one manifest.json listing them all
-export async function exportTakes() {
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(",")[1]);
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(blob);
+});
+
+// Every take as files: { name, blob } for each WAV and JSON label, plus one manifest
+async function takeFiles() {
   const takes = await listTakes();
+  const files = [];
   const manifest = [];
+  takes.forEach((take, i) => {
+    const name = takeFileName(take.label, i + 1);
+    files.push({ name: `${name}.wav`, blob: take.wav });
+    files.push({ name: `${name}.json`, blob: new Blob([JSON.stringify(take.label, null, 2)], { type: "application/json" }) });
+    manifest.push({ file: `${name}.wav`, ...take.label });
+  });
+  files.push({
+    name: `humlab-manifest-${Date.now()}.json`,
+    blob: new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), takes: manifest }, null, 2)], { type: "application/json" }),
+  });
+  return { files, count: takes.length };
+}
+
+// Exports every take (WAV + JSON label) and one manifest. Resolves to the number of takes.
+//   Android app: written to the app's storage, then Android's share sheet opens with all of them
+//                (save to Files / Drive, or send on WhatsApp, email…). The WebView can't download.
+//   Browsers that can share files: the same, through the browser's share sheet.
+//   Other browsers: downloaded one by one.
+export async function exportTakes() {
+  const { files, count } = await takeFiles();
+  if (!count) return 0;
+  const { Capacitor } = await import("@capacitor/core");
+  if (Capacitor.isNativePlatform()) {
+    const [{ Filesystem, Directory }, { Share }] = await Promise.all([import("@capacitor/filesystem"), import("@capacitor/share")]);
+    const folder = `humlab-${Date.now()}`;
+    const uris = [];
+    for (const f of files) {
+      const { uri } = await Filesystem.writeFile({ path: `${folder}/${f.name}`, data: await blobToBase64(f.blob), directory: Directory.Cache, recursive: true });
+      uris.push(uri);
+    }
+    await Share.share({ title: "Hum Lab recordings", text: `${count} Hum Lab takes`, files: uris, dialogTitle: "Save or send your Hum Lab takes" });
+    return count;
+  }
+  const asFiles = files.map((f) => new File([f.blob], f.name, { type: f.blob.type }));
+  if (navigator.canShare?.({ files: asFiles })) {
+    await navigator.share({ title: "Hum Lab recordings", files: asFiles });
+    return count;
+  }
+  await downloadAll(files);
+  return count;
+}
+
+async function downloadAll(files) {
   const download = (blob, name) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -93,13 +144,8 @@ export async function exportTakes() {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
-  for (let i = 0; i < takes.length; i++) {
-    const name = takeFileName(takes[i].label, i + 1);
-    download(takes[i].wav, `${name}.wav`);
-    download(new Blob([JSON.stringify(takes[i].label, null, 2)], { type: "application/json" }), `${name}.json`);
-    manifest.push({ file: `${name}.wav`, ...takes[i].label });
+  for (const f of files) {
+    download(f.blob, f.name);
     await new Promise((r) => setTimeout(r, 350)); // browsers drop rapid-fire downloads
   }
-  download(new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), takes: manifest }, null, 2)], { type: "application/json" }), `humlab-manifest-${Date.now()}.json`);
-  return takes.length;
 }

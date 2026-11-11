@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Microphone, Play, Pause, Trash, DownloadSimple, Check, MagnifyingGlass } from "@phosphor-icons/react";
 import { useAudio, audioProgressEmitter } from "@/contexts/AudioContext";
 import { searchSongs } from "@/lib/catalog";
+import { toast } from "@/lib/toast";
 import { classifyTrack } from "@/lib/ir/classify";
 import { TAKE_KINDS, TAKE_SR, encodeWav, saveTake, listTakes, deleteTake, clearTakes, exportTakes } from "@/lib/melody/humlab";
 import { SUGGESTED_SONGS } from "@/lib/melody/humlabSongs";
@@ -303,7 +304,14 @@ export default function HumLab() {
             </div>
           ))}
           <div className={styles.row}>
-            <button className={styles.primary} onClick={async () => { const n = await exportTakes(); setMessage(`Exported ${n} takes to your downloads`); }}>
+            <button className={styles.primary} onClick={async () => {
+              try {
+                const n = await exportTakes();
+                toast(`${n} takes ready. Save them to Files or Drive, or send them`, { duration: 4000 });
+              } catch (err) {
+                if (!/cancel/i.test(err?.message || "")) toast(`Export failed: ${err?.message || err}`, { variant: "error" });
+              }
+            }}>
               <DownloadSimple size={18} /> Export all
             </button>
             <button className={styles.danger} onClick={async () => { if (confirm("Delete all takes on this device?")) { await clearTakes(); setTakes([]); } }}>Delete all</button>

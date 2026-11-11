@@ -8,7 +8,7 @@ import SyncButton from "@/components/SyncButton";
 import { queueFrom } from "@/lib/ir/recommend";
 import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
-import { mixSongs, chartSongs } from "@/lib/catalog";
+import { mixSongs, chartPage } from "@/lib/catalog";
 import { TRENDS_SEEDS } from "@/app/category/[slug]/categories";
 
 const DIAL_COUNT = 12;
@@ -133,7 +133,6 @@ export default function Trends() {
 
   useFloatingDials(tracks, field, dialRefs);
 
-  const pageRef = useRef(0);
 
   // YouTube Music's Tamil chart (weekly chart + Tamil songs trending in India), in rank order.
   // Sync shows the next set from the chart; only if the charts can't be reached, a search mix.
@@ -141,11 +140,8 @@ export default function Trends() {
     try {
       let list = [];
       try {
-        const chart = await chartSongs("tamil");
-        if (chart.length >= DIAL_COUNT) {
-          pageRef.current = fresh ? (pageRef.current + 1) % Math.max(1, Math.floor(chart.length / DIAL_COUNT)) : 0;
-          list = chart.slice(pageRef.current * DIAL_COUNT, (pageRef.current + 1) * DIAL_COUNT);
-        }
+        // Each Sync: the chart songs shown longest ago (never-shown first), shuffled
+        list = await chartPage("tamil", DIAL_COUNT, { fresh });
       } catch (e) {}
       if (!list.length) list = await mixSongs("trends", TRENDS_SEEDS, { count: DIAL_COUNT, fresh });
       setTracks(list);
