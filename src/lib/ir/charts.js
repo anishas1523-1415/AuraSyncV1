@@ -3,7 +3,7 @@
 // engine (trending.js): only charting songs, strict language pools, one entry per song, with a
 // diagnostic record for every candidate. Works with any youtubei.js client (phone or server).
 // Ranking for the listener happens afterwards, on the phone (catalog.chartPage).
-import { songToTrack, isPlayableSong } from "../musicTracks.js";
+import { songToTrack, isPlayableSong, findAudioVersion } from "../musicTracks.js";
 import { parseTitle } from "./text.js";
 import { classifyTrack } from "./classify.js";
 import { verifyLanguage, findTemplates, collapseVersions, trendStanding, explicitLanguage, POOL_LANGUAGES, LANGUAGE_CODES } from "./trending.js";
@@ -56,6 +56,58 @@ async function trackDetails(yt, videoId) {
   } catch (e) {
     return null;
   }
+}
+
+// ─── Audio versions of chart videos, remembered (found: 30 days; not found: 3 days) ───
+const AUDIO_KEY = "aurasynq_audio_versions_v2";
+const audioMemo = new Map();
+let audioLoaded = false;
+const loadAudio = () => {
+  if (audioLoaded) return;
+  audioLoaded = true;
+  try {
+    const now = Date.now();
+    for (const [id, e] of Object.entries(JSON.parse(globalThis.localStorage?.getItem(AUDIO_KEY) || "{}"))) {
+      if (now - e.at < (e.track ? 30 : 3) * 24 * 60 * 60 * 1000) audioMemo.set(id, e);
+    }
+  } catch (e) {}
+};
+let audioTimer = null;
+const saveAudio = () => {
+  clearTimeout(audioTimer);
+  audioTimer = setTimeout(() => {
+    try { globalThis.localStorage?.setItem(AUDIO_KEY, JSON.stringify(Object.fromEntries([...audioMemo.entries()].slice(-1500)))); } catch (e) {}
+  }, 1000);
+};
+
+// Chart entries (with their trend data) become the songs as released: same verdict, same chart
+// positions, but the audio track's id, title, cover and length. Videos without a clear audio match
+// stay as they are. Two uploads that turn out to be one song are merged.
+async function asAudio(yt, entries) {
+  loadAudio();
+  const out = new Array(entries.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const i = next++;
+      const t = entries[i];
+      if (t.media === "audio") { out[i] = t; continue; }
+      let memo = audioMemo.get(t.id);
+      if (!memo) {
+        let found = null;
+        try { found = await findAudioVersion(yt, t, { keywords: detailsMemo.get(t.id)?.keywords || [], language: t.trend?.language || null }); } catch (e) {}
+        memo = { track: found && { id: found.id, title: found.title, artist: found.artist, album: found.album, cover: found.cover, duration: found.duration }, at: Date.now() };
+        audioMemo.set(t.id, memo);
+        saveAudio();
+      }
+      out[i] = memo.track
+        ? { ...t, ...memo.track, url: `https://www.youtube.com/watch?v=${memo.track.id}`, media: "audio", trend: { ...t.trend, videoId: t.id } }
+        : { ...t, media: "video" };
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  const seen = new Set();
+  return out.filter((t) => t && !seen.has(t.id) && seen.add(t.id));
 }
 
 // ─── Nightly trend data (scripts/trend-snapshot.mjs): momentum, views, audio language ───
@@ -241,11 +293,11 @@ export async function languageTrending(yt, language, { country = "IN", count = 4
   const out = kept.slice(0, count);
   out.forEach(({ candidate, standing, lang }) => report.push({ id: candidate.track.id, title: candidate.track.title, artist: candidate.track.artist, accepted: true, reason: "trending, verified language", detail: lang.method, lang, charts: candidate.charts, standing }));
   diagnostics.set(language, { at: Date.now(), country, candidates: candidates.length, checked, eligible: out.length, report });
-  return out.map(({ candidate, standing, lang }) => ({
+  return asAudio(yt, out.map(({ candidate, standing, lang }) => ({
     ...candidate.track,
     trending: true,
     trend: publicTrend(standing, { charts: candidate.charts, language: lang.language, languageStatus: lang.status, languageMethod: lang.method, languageConfidence: lang.confidence }),
-  }));
+  })));
 }
 
 // ─── Trending now in the country ───
@@ -288,9 +340,9 @@ export async function trendingNow(yt, { country = "IN", languages = [], count = 
       ...dropped.map(({ item, of, reason }) => ({ id: item.candidate.track.id, title: item.candidate.track.title, accepted: false, reason: "duplicate", detail: `${reason}: ${of.title}` })),
     ],
   });
-  return out.map(({ candidate, standing }) => ({
+  return asAudio(yt, out.map(({ candidate, standing }) => ({
     ...candidate.track,
     trending: true,
     trend: publicTrend(standing, { charts: candidate.charts }),
-  }));
+  })));
 }

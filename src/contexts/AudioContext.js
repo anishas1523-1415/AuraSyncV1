@@ -433,20 +433,32 @@ export function AudioProvider({ children }) {
 
   const fetchLyricsFromApi = useRef(null);
   const lyricsAbortRef = useRef(null);
+  // A music video (no audio version found) usually opens with scenes or dialogue before the song,
+  // and lyrics are timed to the song as released. When the lyrics are for a recording shorter than
+  // the video by 4-60 s, their lines are moved later by the difference (the intro).
+  const introOffset = (track, lyricsDuration) => {
+    if (track?.media !== "video" || !lyricsDuration || !track.duration) return 0;
+    const extra = track.duration - lyricsDuration;
+    return extra >= 4 && extra <= 60 ? extra : 0;
+  };
   fetchLyricsFromApi.current = async (title, artist, trackId, hadOwnLyrics) => {
+    const track = currentTrackRef.current?.id === trackId ? currentTrackRef.current : null;
+    const duration = Math.round(track?.duration || 0);
     if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
     lyricsAbortRef.current = new AbortController();
     const signal = lyricsAbortRef.current.signal;
 
     let lyricsLines = null;
     try {
-      const url = apiUrl(`/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
+      const url = apiUrl(`/api/lyrics?id=${encodeURIComponent(trackId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}${duration ? `&duration=${duration}` : ""}`);
       const res = await fetch(url, { signal });
       if (res.ok) {
         const data = await res.json();
         lyricsLines = data.syncedLyrics
           ? parseLRC(data.syncedLyrics)
           : parsePlainLyrics(data.plainLyrics, data.duration);
+        const shift = data.syncedLyrics ? introOffset(track, data.duration) : 0;
+        if (shift && lyricsLines) lyricsLines = lyricsLines.map((l) => ({ ...l, time: l.time + shift }));
       }
     } catch (err) {
       if (err.name === 'AbortError') return null;

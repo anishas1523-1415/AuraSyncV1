@@ -17,7 +17,7 @@ const KEY = "sb_publishable_yQH14RAGbnH9ceyKnIuXnQ_t34VNHnz"; // publishable: in
 const CONTRIBUTOR_KEY = "aurasynq_humlab_contributor";
 const PROFILE_KEY = "aurasynq_humlab_profile";
 export const CONSENT_VERSION = 2; // 2: takes are shared automatically (1: kept on the phone only)
-const APP_VERSION = "1.0.6";
+const APP_VERSION = "1.0.7";
 
 export function sharingAllowed() {
   try {

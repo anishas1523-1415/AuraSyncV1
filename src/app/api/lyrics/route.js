@@ -63,16 +63,17 @@ const toPayload = (data) => ({
   duration: data.duration || 0
 });
 
-async function lrclibGet({ track, artist }, signal) {
+// duration (seconds): LRCLIB then only returns lyrics timed for a recording of that length (±2 s)
+async function lrclibGet({ track, artist }, signal, duration = 0) {
   if (!artist) return null;
-  const url = `${LRCLIB}/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}`;
+  const url = `${LRCLIB}/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}${duration ? `&duration=${Math.round(duration)}` : ''}`;
   const res = await fetch(url, { signal, headers: LRCLIB_HEADERS });
   if (!res.ok) return null;
   const data = await res.json();
   return data.syncedLyrics || data.plainLyrics ? toPayload(data) : null;
 }
 
-async function lrclibSearch({ track, artist }, signal) {
+async function lrclibSearch({ track, artist }, signal, duration = 0) {
   const params = artist
     ? `track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}`
     : `q=${encodeURIComponent(track)}`;
@@ -80,26 +81,37 @@ async function lrclibSearch({ track, artist }, signal) {
   if (!res.ok) return null;
   const results = await res.json();
   if (!Array.isArray(results)) return null;
-  // Prefer time-synced lyrics, then any lyrics at all
-  const best = results.find(r => r.syncedLyrics) || results.find(r => r.plainLyrics);
+  // Time-synced lyrics of a recording with the same length first (the lines then land on time),
+  // then the synced lyrics closest in length, then any lyrics at all
+  const off = (r) => (duration && r.duration ? Math.abs(r.duration - duration) : 999);
+  const synced = results.filter(r => r.syncedLyrics).sort((a, b) => off(a) - off(b));
+  const best = synced.find(r => off(r) <= 5) || synced[0] || results.find(r => r.plainLyrics);
   return best ? toPayload(best) : null;
 }
 
-async function findLyrics(title, artist) {
+// duration: the length of the recording being played (0 = unknown)
+async function findLyrics(title, artist, duration = 0) {
   const signal = AbortSignal.timeout(8000);
   const candidates = buildCandidates(title, artist);
 
-  // Exact matches first (cheap and precise), then fuzzy search
+  // Exact matches of this recording's length first (precise timing), then exact matches of any
+  // length, then fuzzy search (which prefers the same length)
+  if (duration) {
+    for (const candidate of candidates) {
+      const exact = await lrclibGet(candidate, signal, duration);
+      if (exact) return exact;
+    }
+  }
   for (const candidate of candidates) {
     const exact = await lrclibGet(candidate, signal);
     if (exact) return exact;
   }
   for (const candidate of candidates) {
-    const fuzzy = await lrclibSearch(candidate, signal);
+    const fuzzy = await lrclibSearch(candidate, signal, duration);
     if (fuzzy) return fuzzy;
   }
   if (candidates[0]) {
-    return lrclibSearch({ track: `${candidates[0].track} ${candidates[0].artist || ''}`.trim() }, signal);
+    return lrclibSearch({ track: `${candidates[0].track} ${candidates[0].artist || ''}`.trim() }, signal, duration);
   }
   return null;
 }
@@ -109,12 +121,15 @@ export async function GET(request) {
   const id = searchParams.get('id') || '';
   const title = searchParams.get('title') || '';
   const artist = searchParams.get('artist') || '';
+  const duration = Math.max(0, Math.min(3600, Number(searchParams.get('duration')) || 0));
+  // Lyrics saved for this song before are reused only if they were timed for this length
+  const fitsLength = (payload) => !duration || !payload?.duration || Math.abs(payload.duration - duration) <= 8;
 
   if (!title) {
     return NextResponse.json({ error: 'Missing title' }, { status: 400 });
   }
 
-  const cacheKey = `${title}-${artist}`.toLowerCase();
+  const cacheKey = `${title}-${artist}-${Math.round(duration / 5)}`.toLowerCase();
 
   // 1. Check local memory cache
   const cached = lyricsCache.get(cacheKey);
@@ -133,8 +148,10 @@ export async function GET(request) {
 
       if (!dbError && dbData && dbData.lyrics) {
         const payload = JSON.parse(dbData.lyrics);
-        lyricsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
-        return NextResponse.json(payload);
+        if (fitsLength(payload)) {
+          lyricsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+          return NextResponse.json(payload);
+        }
       }
     } catch (e) {
       console.warn("Supabase lyrics cache read failed", e);
@@ -143,7 +160,7 @@ export async function GET(request) {
 
   let lyricsPayload = null;
   try {
-    lyricsPayload = await findLyrics(title, artist);
+    lyricsPayload = await findLyrics(title, artist, duration);
   } catch (fetchErr) {
     if (fetchErr.name === 'TimeoutError') {
       console.warn('[AuraSynq Lyrics]: External API timed out. Falling back to null.');

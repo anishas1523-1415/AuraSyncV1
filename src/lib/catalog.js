@@ -92,8 +92,8 @@ const chartPool = (kind) => (kind === "now" ? 80 : 56);
 
 export function chartSongs(kind, { fresh = false } = {}) {
   const languages = regionalLanguages(getProfile());
-  // "chart2": results carry the trending engine's verdicts (trend); older saved lists don't
-  const key = `chart2:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
+  // "chart3": songs as released (audio versions); older saved lists hold the music videos
+  const key = `chart3:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
   return cached(key, () => lookup(
     (m) => m.chartSongs(kind, { country: country(), languages, count: chartPool(kind) }),
     { chart: kind, country: country(), langs: languages.join(",") },
