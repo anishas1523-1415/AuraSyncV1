@@ -59,7 +59,7 @@ async function trackDetails(yt, videoId) {
 }
 
 // ─── Audio versions of chart videos, remembered (found: 30 days; not found: 3 days) ───
-const AUDIO_KEY = "aurasynq_audio_versions_v2";
+const AUDIO_KEY = "aurasynq_audio_versions_v3";
 const audioMemo = new Map();
 let audioLoaded = false;
 const loadAudio = () => {
@@ -95,7 +95,7 @@ async function asAudio(yt, entries) {
       let memo = audioMemo.get(t.id);
       if (!memo) {
         let found = null;
-        try { found = await findAudioVersion(yt, t, { keywords: detailsMemo.get(t.id)?.keywords || [], language: t.trend?.language || null }); } catch (e) {}
+        try { found = await findAudioVersion(yt, t, { keywords: detailsMemo.get(t.id)?.keywords || [], language: t.trend?.language || ownLanguage(t).language || null }); } catch (e) {}
         memo = { track: found && { id: found.id, title: found.title, artist: found.artist, album: found.album, cover: found.cover, duration: found.duration }, at: Date.now() };
         audioMemo.set(t.id, memo);
         saveAudio();

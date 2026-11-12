@@ -178,12 +178,29 @@ export async function findAudioVersion(yt, video, options = {}) {
   const film = filmOf(video);
   const queries = [`${name} ${main}`];
   if (film && !main.toLowerCase().includes(film)) queries.push(`${name} ${film}`);
+  const language = options.language || languageMark(video.title);
   for (const q of queries) {
-    const found = await searchMusicSongs(yt, q).catch(() => []);
-    const match = found.slice(0, 6).find((a) => isAudioMatch(video, a, options));
-    if (match) return match;
+    const found = (await searchMusicSongs(yt, q).catch(() => [])).slice(0, 8);
+    const matches = found.filter((x) => isAudioMatch(video, x, options));
+    if (!matches.length) continue;
+    return pickVersion(name, found, matches, language);
   }
   return null;
+}
+
+// Songs released in several languages (a Tamil film's songs also as a Hindi and Telugu dub): the
+// dub's album isn't always marked ("Jan Neta" is the Hindi "Jana Nayagan"). The version marked with
+// the song's own language wins; an unmarked one is taken only when no other-language version of the
+// song shows up; otherwise the video stays (better than the wrong language).
+function pickVersion(name, found, matches, language) {
+  const mark = (x) => languageMark(x.title) || languageMark(x.album);
+  if (language) {
+    const own = matches.find((x) => mark(x) === language);
+    if (own) return own;
+  }
+  const multiLanguage = found.some((x) => sameSongName(songName(x.title), name) && mark(x) && mark(x) !== language);
+  if (multiLanguage) return null;
+  return matches.find((x) => !mark(x) || mark(x) === language) || null;
 }
 
 // YouTube Music's own autocomplete for a half-typed query

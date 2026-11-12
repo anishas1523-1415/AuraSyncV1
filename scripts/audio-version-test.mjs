@@ -1,6 +1,6 @@
 // Audio-version matching tests (run: node scripts/audio-version-test.mjs). Offline.
 // Real chart videos (2026-11-12) and the YouTube Music audio tracks they should, or must not, map to.
-import { isAudioMatch, sameSongName } from "../src/lib/musicTracks.js";
+import { isAudioMatch, sameSongName, findAudioVersion } from "../src/lib/musicTracks.js";
 
 let failures = 0;
 let total = 0;
@@ -30,6 +30,21 @@ check("not the Hindi dub of a Tamil song", !isAudioMatch(v("Thalapathy Kacheri",
 check("not a same-named song with no shared singer or film", !isAudioMatch(v("Pattampoochi (feat. Suriya & Mamitha)", "Sublahshini, G. V. Prakash Kumar", 280), a("Pattampoochi (feat. Pragathi Guruprasad & M.Kowtham)", "Kadhalviruz", 382)));
 check("not a much shorter part or promo", !isAudioMatch(v("Raathu Raasan", "Sai Abhyankkar", 300), a("Raathu Raasan", "Sai Abhyankkar", 60)));
 check("short names need an exact match", !sameSongName("aathi", "aathu"));
+
+// Multi-language releases, in the order the phone's YouTube Music returned them (2026-11-12)
+const fakeYt = (rows) => ({ music: { search: async () => ({ songs: { contents: rows.map(([id, title, artist, album, seconds]) => ({ id, title, artists: artist.split(", ").map((name) => ({ name })), album: { name: album }, duration: { seconds }, thumbnails: [], item_type: "song" })) } }) } });
+const kacheri = { id: "kacheriVid01", title: "Thalapathy Kacheri", artist: "Anirudh Ravichander", duration: 294, media: "video" };
+const phoneOrder = [
+  ["hindiDub0001", "Thalapathy Kacheri", "Anirudh Ravichander, Nazeeruddin", "Jan Neta", 195],
+  ["tamilOrig001", "Thalapathy Kacheri", "Anirudh Ravichander, Thalapathy Vijay, Arivu", "Jana Nayagan - Tamil", 198],
+  ["teluguDub001", "Thalapathy Kacheri", "Anirudh Ravichander, Nazeeruddin", "Jana Nayakudu - Telugu", 198],
+];
+check("multi-language release: the version marked Tamil wins over an unmarked dub listed first",
+  (await findAudioVersion(fakeYt(phoneOrder), kacheri, { language: "tamil" }))?.id === "tamilOrig001");
+check("multi-language release with no Tamil-marked version: keep the video, don't guess",
+  (await findAudioVersion(fakeYt([phoneOrder[0], phoneOrder[2]]), kacheri, { language: "tamil" })) === null);
+check("single-language release: the unmarked audio is used",
+  (await findAudioVersion(fakeYt([["magaleAud001", "Magale (From \"Baththa\")", "Sai Abhyankkar, Harini", "Magale (From \"Baththa\")", 258]]), { id: "magaleVid001", title: "Magale", artist: "Sai Abhyankkar, Harini", duration: 283, media: "video" }, { language: "tamil" }))?.id === "magaleAud001");
 
 console.log(failures ? `\n${failures} of ${total} failed` : `\nAll ${total} audio-version tests passed`);
 process.exit(failures ? 1 : 0);

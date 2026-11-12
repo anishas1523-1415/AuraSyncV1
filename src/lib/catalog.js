@@ -92,8 +92,8 @@ const chartPool = (kind) => (kind === "now" ? 80 : 56);
 
 export function chartSongs(kind, { fresh = false } = {}) {
   const languages = regionalLanguages(getProfile());
-  // "chart3": songs as released (audio versions); older saved lists hold the music videos
-  const key = `chart3:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
+  // "chart4": songs as released, right language version (older saved lists hold videos or dubs)
+  const key = `chart4:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
   return cached(key, () => lookup(
     (m) => m.chartSongs(kind, { country: country(), languages, count: chartPool(kind) }),
     { chart: kind, country: country(), langs: languages.join(",") },
