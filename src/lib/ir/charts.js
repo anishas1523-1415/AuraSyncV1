@@ -185,7 +185,7 @@ export async function languageTrending(yt, language, { country = "IN", count = 4
     const own = ownLanguage(c.track);
     const marker = explicitLanguage(c.track.title);
     const audio = songTrend(c.track.id)?.audioLanguage;
-    if (onLanguageChart || own.language === language || marker === language || LANGUAGE_OVERRIDES[c.track.id]?.language === language || (audio && LANGUAGE_CODES[audio.split("-")[0]] === language)) {
+    if (onLanguageChart || own.language === language || marker === language || LANGUAGE_OVERRIDES[c.track.id]?.language === language || (audio && LANGUAGE_CODES[audio.split("-")[0].toLowerCase()] === language)) {
       considered.push(c);
     } else {
       report.push({ id: c.track.id, title: c.track.title, artist: c.track.artist, accepted: false, reason: own.language ? "language mismatch" : "language uncertain", detail: own.language ? `classifier: ${own.language}` : "not on the language chart, no evidence", charts: c.charts });

@@ -118,6 +118,17 @@ const noData = verifyLanguage({ track: { id: "x", title: "Something" }, charts: 
 check("D5 unknown language never defaults to Tamil", noData.language === null && noData.status === "uncertain");
 const chartOnly = verifyLanguage({ track: { id: "y", title: "Mystery" }, charts: [{ chart: "weekly:tamil", rank: 5 }] }, {});
 check("D6 the language chart alone does not verify a song", chartOnly.status !== "verified", chartOnly.status);
+const tamilOnChart = { track: { id: "z1", title: "Kadhal Vandhale" }, charts: [{ chart: "weekly:tamil", rank: 3 }] };
+const tamilDetails = { keywords: ["kadhal vandhale tamil song", "tamil songs"] };
+const englishDefault = verifyLanguage(tamilOnChart, { details: tamilDetails, trend: { audioLanguage: "en-US" }, classify: () => ({ language: "tamil", confidence: 0.9 }) });
+check("D12 an uploader's default English audio language doesn't block a Tamil song", englishDefault.status === "verified" && englishDefault.language === "tamil", JSON.stringify(englishDefault));
+const labelDefault = verifyLanguage(tamilOnChart, { details: tamilDetails, trend: { audioLanguage: "hi" }, classify: () => ({ language: "tamil", confidence: 0.9 }) });
+check("D13 a label-wide audio default (hi) alone can't overrule chart, tags and title", labelDefault.status === "verified" && labelDefault.language === "tamil", JSON.stringify(labelDefault));
+const agreeing = verifyLanguage({ track: { id: "z2", title: "Mystery" }, charts: [{ chart: "weekly:tamil", rank: 3 }] }, { trend: { audioLanguage: "ta" } });
+check("D14 audio language agreeing with the language chart verifies a song", agreeing.status === "verified", JSON.stringify(agreeing));
+const noVocals = verifyLanguage(tamilOnChart, { details: tamilDetails, trend: { audioLanguage: "zxx" }, classify: () => ({ language: "tamil", confidence: 0.9 }) });
+check("D15 'zxx' (no spoken language) counts as instrumental and is excluded", noVocals.status !== "verified", JSON.stringify(noVocals));
+check("D16 YouTube's 'bh' code reads as Bhojpuri", verifyLanguage({ track: { id: "z3", title: "Lagal" }, charts: [{ chart: "weekly:bhojpuri", rank: 1 }] }, { trend: { audioLanguage: "bh" } }).language === "bhojpuri");
 check("D7 explicit language markers are read, film names are not", explicitLanguage("Song (Telugu)") === "telugu" && explicitLanguage("Azhagiya Tamil Magan Songs") === null);
 setTrendDataLoader(() => ({ generatedAt: new Date(Date.now() - 5 * 24 * 3600e3).toISOString(), songs: { [S.tamilHit.id]: { status: "rising" } } }));
 const stale = await languageTrending(fakeYt, "tamil", { count: 20 });

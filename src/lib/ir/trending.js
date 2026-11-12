@@ -40,7 +40,8 @@ const LANGUAGE_WORDS = {
   english: /\benglish\b/i,
 };
 // Data API audio-language codes
-export const LANGUAGE_CODES = { ta: "tamil", te: "telugu", hi: "hindi", ml: "malayalam", kn: "kannada", pa: "punjabi", bn: "bengali", mr: "marathi", bho: "bhojpuri", bgc: "haryanvi", en: "english" };
+// (YouTube uses "bh" for Bhojpuri; "zxx" means no spoken language: instrumental)
+export const LANGUAGE_CODES = { ta: "tamil", te: "telugu", hi: "hindi", ml: "malayalam", kn: "kannada", pa: "punjabi", bn: "bengali", mr: "marathi", bho: "bhojpuri", bh: "bhojpuri", bgc: "haryanvi", en: "english" };
 const SCRIPTS = [
   [/[஀-௿]/, "tamil"], [/[ఀ-౿]/, "telugu"], [/[ഀ-ൿ]/, "malayalam"],
   [/[ಀ-೿]/, "kannada"], [/[਀-੿]/, "punjabi"], [/[ঀ-৿]/, "bengali"],
@@ -50,7 +51,10 @@ const GENERIC = new Set(["song", "songs", "video", "videos", "movie", "movies", 
 
 // Evidence weights. Track-level sources describe THIS upload; supporting ones (script, word lists,
 // artist priors) can confirm but never decide on their own.
-const W = { override: 10, marker: 1, audioLanguage: 0.8, languageChart: 0.6, specificTags: 0.4, genericTags: 0.15, description: 0.1, script: 0.25, classifier: 0.3 };
+// The uploader's audio language (YouTube Data API) is set by the channel and often left at a default:
+// on 97 Tamil-chart songs it agreed with the chart 74 times (2026-11-12); "en" and label-wide
+// defaults ("hi" on every T-Series upload) were the misses. So it supports, it doesn't decide.
+const W = { override: 10, marker: 1, audioLanguage: 0.5, audioDefault: 0.1, languageChart: 0.6, specificTags: 0.4, genericTags: 0.15, description: 0.1, script: 0.25, classifier: 0.3 };
 const TRACK_LEVEL = new Set(["override", "marker", "audioLanguage", "languageChart", "specificTags"]);
 
 // "(Tamil)", "[Telugu Version]", "Hindi Dubbed", "- Malayalam" at the end
@@ -103,8 +107,12 @@ export function verifyLanguage(candidate, context = {}) {
     return finish({ support, sources, forced: context.override.language });
   }
   add("marker", explicitLanguage(track.title), W.marker);
-  const audio = context.trend?.audioLanguage;
-  if (audio) add("audioLanguage", LANGUAGE_CODES[audio.split("-")[0]] || null, W.audioLanguage, audio);
+  const audio = context.trend?.audioLanguage || null;
+  const audioCode = audio ? audio.split("-")[0].toLowerCase() : null;
+  const noVocals = audioCode === "zxx";
+  // English is the common untouched default: weak evidence, never track-level
+  if (audioCode === "en") add("audioDefault", "english", W.audioDefault, audio);
+  else if (audioCode && !noVocals) add("audioLanguage", LANGUAGE_CODES[audioCode] || null, W.audioLanguage, audio);
   for (const c of charts) {
     const m = /^weekly:(\w+)$/.exec(c.chart);
     if (m && LANGUAGE_WORDS[m[1]]) add("languageChart", m[1], W.languageChart, `#${c.rank + 1}`);
@@ -134,8 +142,8 @@ export function verifyLanguage(candidate, context = {}) {
   const c = context.classify?.(track);
   if (c?.language && !c.byNeighbours) add("classifier", c.language, W.classifier * Math.min(1, c.confidence ?? 1), `confidence ${(c.confidence ?? 1).toFixed(2)}`);
 
-  const instrumental = VARIANT_TERMS.instrumental.test(track.title || "") || VARIANT_TERMS.karaoke.test(track.title || "");
-  return finish({ support, sources, instrumental, hasAudioLanguage: !!audio });
+  const instrumental = noVocals || VARIANT_TERMS.instrumental.test(track.title || "") || VARIANT_TERMS.karaoke.test(track.title || "");
+  return finish({ support, sources, instrumental, hasAudioLanguage: !!audioCode && !noVocals && audioCode !== "en" });
 }
 
 function finish({ support, sources, forced = null, instrumental = false, hasAudioLanguage = false }) {
@@ -151,7 +159,8 @@ function finish({ support, sources, forced = null, instrumental = false, hasAudi
   const trackLevelFor = (lang) => sources.some((s) => s.language === lang && TRACK_LEVEL.has(s.source));
   const otherMarker = sources.some((s) => s.source === "marker" && s.language !== primary);
   if (otherMarker) return { ...base, status: "conflict", reason: "title marks another language" };
-  if (secondary && trackLevelFor(secondary) && second >= TREND_CONFIG.conflictShare * top) {
+  const conflictingLevel = (lang) => sources.some((s) => s.language === lang && TRACK_LEVEL.has(s.source) && s.source !== "audioLanguage");
+  if (secondary && conflictingLevel(secondary) && second >= TREND_CONFIG.conflictShare * top) {
     return { ...base, status: "conflict", reason: `${primary} and ${secondary} both claimed` };
   }
   // The word lists and artist priors can't make a song Tamil, but when they are sure it's another
