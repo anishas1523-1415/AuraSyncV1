@@ -10,7 +10,10 @@ globalThis.localStorage = {
 };
 
 const profile = await import("../src/lib/ir/profile.js");
-const { pickChartSongs, pickSeeds, personalize } = await import("../src/lib/ir/recommend.js");
+const { pickSeeds, personalize } = await import("../src/lib/ir/recommend.js");
+const { rankTrending } = await import("../src/lib/ir/trending.js");
+const { trackFeatures } = await import("../src/lib/ir/classify.js");
+const { cosine } = await import("../src/lib/ir/rank.js");
 
 let failures = 0;
 const check = (name, ok, detail = "") => {
@@ -55,7 +58,7 @@ check("lastJudged reports a positive recent song", profile.lastJudged("ts1")?.po
 profile.recordSearch("anirudh");
 check("a searched short name maps to the full artist heard", !!profile.exportTaste().queries["artist:anirudh ravichander"]);
 
-// 3. Charts: same rank order shown, but the listener's songs win places among the candidates
+// 3. Charts: trending songs ranked by this listener's taste (the trending engine; full tests in trending-test.mjs)
 const chart = [
   song("c1", "Chart Pop 1", "Taylor Swift"), song("c2", "Chart Rap", "Eminem"), song("c3", "Chart Pop 2", "Dua Lipa"),
   song("c4", "Chart Pop 3", "Ed Sheeran"), song("c5", "Hukum", "Anirudh Ravichander"), song("c6", "Chart Pop 4", "Coldplay"),
@@ -63,9 +66,13 @@ const chart = [
 ];
 profile.recordFeedback(chart[1], "quick_skip");
 profile.recordFeedback(chart[1], "quick_skip");
-const picked = pickChartSongs(chart, 5).map((t) => t.id);
-check("chart pick keeps the listener's artist", picked.includes("c5") && picked.includes("c7"), picked.join(","));
-check("chart pick drops a song they keep skipping", !picked.includes("c2"), picked.join(","));
+const intent = profile.getIntent();
+const ranked = rankTrending(chart.map((track, i) => ({ track, standing: { regional: 1 / (1 + i / 10), broader: 0.5 } })), {
+  intentFit: (t) => cosine(intent, trackFeatures(t)), judged: profile.judgedCount(), heard: (id) => !!profile.lastJudged(id), rejected: profile.isRejected,
+}).map((r) => r.track.id);
+// With little history the chart still leads (the brief's new-listener weights): their artist moves up, not to the top
+check("trending: the listener's artist moves up from its chart position", ranked.indexOf("c5") < 4 && ranked.indexOf("c7") < 6, ranked.join(","));
+check("trending: a song they keep skipping goes last, not out", ranked[ranked.length - 1] === "c2" && ranked.length === chart.length, ranked.join(","));
 
 // 4. Mixes: a seed whose songs were played through comes up more than one whose songs were skipped
 for (let i = 0; i < 4; i++) {

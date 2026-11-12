@@ -9,8 +9,7 @@ import SyncButton from "@/components/SyncButton";
 import { queueFrom } from "@/lib/ir/recommend";
 import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
-import { mixSongs, chartPage } from "@/lib/catalog";
-import { TRENDING_SEEDS } from "@/app/category/[slug]/categories";
+import { chartPage } from "@/lib/catalog";
 
 const ROW_HEIGHT = 150; // a dial, its name and its float fit before the next dial in the column
 
@@ -105,16 +104,15 @@ export default function Trending() {
   const mapRef = useRef(null);
 
 
-  // YouTube Music's charts for the country (Trending, Daily Top, Top 100, plus the listener's
-  // languages' weekly charts), in rank order; Sync shows the next set. Search mix only as fallback.
+  // Genuinely trending songs only (the trending engine: YouTube Music's charts for the country and
+  // the listener's languages), ranked for the listener; Sync shows the next set. No filler: if the
+  // charts can't be reached, nothing else is shown in their place.
   const loadTrending = async (fresh = false) => {
     try {
       let list = [];
       try {
-        // Each Sync: the chart songs shown longest ago (never-shown first), shuffled
         list = await chartPage("now", 16, { fresh });
       } catch (e) {}
-      if (!list.length) list = await mixSongs("trending", TRENDING_SEEDS, { count: 16, seedsPerMix: 3, fresh });
       setTracks(list);
       prefetchTracks(list);
       mapRef.current?.scrollTo({ top: 0, behavior: "smooth" });

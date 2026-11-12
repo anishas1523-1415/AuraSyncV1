@@ -5,7 +5,11 @@ import { Innertube, UniversalCache } from "youtubei-web/web";
 import { nativeFetch } from "./nativeHttp";
 import { musicRadio, searchMusicSongs, musicSuggestions } from "../musicTracks";
 import { createSearch } from "../ir/search";
-import { languageTrending, trendingNow } from "../ir/charts";
+import { languageTrending, trendingNow, setTrendDataLoader } from "../ir/charts";
+import { apiUrl } from "@/lib/api";
+
+// Chart momentum and Data API facts from the nightly snapshot job (see scripts/trend-snapshot.mjs)
+setTrendDataLoader(() => fetch(apiUrl("/trend-data.json"), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)));
 import { analyzeQuery } from "../ir/query";
 import { ensureMoodIndex, learnMoods } from "../ir/moods";
 import { getProfile } from "../ir/profile";

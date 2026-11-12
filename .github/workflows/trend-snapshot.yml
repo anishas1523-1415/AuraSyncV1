@@ -1,0 +1,44 @@
+# Saves today's YouTube Music charts and publishes chart momentum (scripts/trend-snapshot.mjs).
+# public/trend-data.json is committed to main; the website deploys it and the app reads it.
+# Secrets: SUPABASE_SERVICE_KEY (chart history); YOUTUBE_API_KEY (optional: views, audio language).
+name: Chart snapshot
+
+on:
+  schedule:
+    - cron: "0 22 * * *" # 03:30 India time
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: push-main
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Snapshot and momentum
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: node scripts/trend-snapshot.mjs IN
+      - name: Publish
+        run: |
+          git config user.name "aurasynq-trends"
+          git config user.email "aurasynq-trends@users.noreply.github.com"
+          git add public/trend-data.json
+          git diff --cached --quiet && { echo "No change"; exit 0; }
+          git commit -m "chore(trends): chart snapshot $(date -u +%F)"
+          git pull --rebase origin main
+          git push origin HEAD:main

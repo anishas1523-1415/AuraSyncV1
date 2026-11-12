@@ -5,7 +5,10 @@ import { Innertube } from 'youtubei.js';
 import { supabase, isSupabaseActive } from '@/lib/supabase';
 import { musicRadio, musicSuggestions } from '@/lib/musicTracks';
 import { createSearch } from '@/lib/ir/search';
-import { languageTrending, trendingNow } from '@/lib/ir/charts';
+import { languageTrending, trendingNow, setTrendDataLoader } from '@/lib/ir/charts';
+import trendDataFile from '../../../../public/trend-data.json';
+
+setTrendDataLoader(() => trendDataFile);
 
 const ytSearch = require('youtube-search-api');
 

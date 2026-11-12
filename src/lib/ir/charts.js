@@ -1,99 +1,85 @@
 // What's actually trending: YouTube Music's official charts for a country (Trending 20, Daily Top,
-// Top 100) and its weekly per-language charts (e.g. "Top Weekly Videos Tamil"), merged with
-// reciprocal rank fusion. Works with any youtubei.js client (phone or server).
+// Top 100) and its weekly per-language charts ("Top Weekly Videos Tamil"), run through the trending
+// engine (trending.js): only charting songs, strict language pools, one entry per song, with a
+// diagnostic record for every candidate. Works with any youtubei.js client (phone or server).
+// Ranking for the listener happens afterwards, on the phone (catalog.chartPage).
 import { songToTrack, isPlayableSong } from "../musicTracks.js";
-import { parseTitle, normalize } from "./text.js";
-import { reciprocalRankFusion, collapseDuplicates } from "./rank.js";
+import { parseTitle } from "./text.js";
 import { classifyTrack } from "./classify.js";
-
-// ─── Language verification from YouTube's own video details ───
-// A song's tags and description almost always name its language ("Latest Tamil songs"), which is
-// stronger evidence than any word list. Each song is looked up once and remembered.
-const LANGUAGE_PATTERNS = {
-  tamil: /\b(tamil|kollywood)\b/gi,
-  telugu: /\b(telugu|tollywood)\b/gi,
-  hindi: /\b(hindi|bollywood)\b/gi,
-  malayalam: /\b(malayalam|mollywood)\b/gi,
-  kannada: /\b(kannada|sandalwood)\b/gi,
-  punjabi: /\b(punjabi)\b/gi,
-  bengali: /\b(bengali|bangla)\b/gi,
-  marathi: /\b(marathi)\b/gi,
-  bhojpuri: /\b(bhojpuri)\b/gi,
-  haryanvi: /\b(haryanvi)\b/gi,
-};
-const VOTES_KEY = "aurasynq_lang_votes";
-const votesMemo = new Map();
-let votesLoaded = false;
-const loadVotes = () => {
-  if (votesLoaded) return;
-  votesLoaded = true;
-  try {
-    for (const [id, votes] of Object.entries(JSON.parse(globalThis.localStorage?.getItem(VOTES_KEY) || "{}"))) votesMemo.set(id, votes);
-  } catch (e) {}
-};
-let votesTimer = null;
-const saveVotes = () => {
-  clearTimeout(votesTimer);
-  votesTimer = setTimeout(() => {
-    try {
-      const entries = [...votesMemo.entries()].slice(-1500);
-      globalThis.localStorage?.setItem(VOTES_KEY, JSON.stringify(Object.fromEntries(entries)));
-    } catch (e) {}
-  }, 1000);
-};
-
-// { tamil: 3, telugu: 0, ... } from the video's keywords (counted double) and description, or null
-async function languageVotes(yt, videoId) {
-  loadVotes();
-  if (votesMemo.has(videoId)) return votesMemo.get(videoId);
-  try {
-    const info = await yt.getBasicInfo(videoId, "WEB");
-    const keywords = (info.basic_info?.keywords || []).join(" ");
-    const description = String(info.basic_info?.short_description || "").slice(0, 800);
-    const votes = {};
-    for (const [lang, pattern] of Object.entries(LANGUAGE_PATTERNS)) {
-      const n = (keywords.match(pattern) || []).length * 2 + (description.match(pattern) || []).length;
-      if (n) votes[lang] = n;
-    }
-    votesMemo.set(videoId, votes);
-    saveVotes();
-    return votes;
-  } catch (e) {
-    return null; // couldn't look it up: callers fall back to the word-list evidence
-  }
-}
-
-// accept = the song's own details agree with the language (or say nothing against it)
-function decideLanguage(language, ownLanguage, votes) {
-  if (votes && Object.keys(votes).length) {
-    const mine = votes[language] || 0;
-    const other = Math.max(0, ...Object.entries(votes).filter(([l]) => l !== language).map(([, n]) => n));
-    if (mine > 0 && mine >= other) return true;
-    if (other > mine) return false;
-  }
-  return !ownLanguage || ownLanguage === language;
-}
-
-// Walks the ranked songs, 8 at a time, keeping those that pass, until `count` have been kept
-async function filterByLanguage(yt, language, ranked, count, ownLanguage) {
-  const kept = [];
-  for (let i = 0; i < ranked.length && kept.length < count; i += 8) {
-    const chunk = ranked.slice(i, i + 8);
-    const votes = await Promise.all(chunk.map((t) => languageVotes(yt, t.id)));
-    chunk.forEach((t, j) => { if (decideLanguage(language, ownLanguage(t), votes[j])) kept.push(t); });
-  }
-  return kept.slice(0, count);
-}
+import { verifyLanguage, findTemplates, collapseVersions, trendStanding, explicitLanguage, POOL_LANGUAGES, LANGUAGE_CODES } from "./trending.js";
+import { LANGUAGE_OVERRIDES } from "./languageOverrides.js";
 
 const CHART_TTL_MS = 3 * 60 * 60 * 1000;
 // Chart entries that aren't songs: film promos and announcements
 const NOT_A_SONG = /\b(glimpse|teaser|trailer|promo|first look|motion poster|making|behind the scenes|bts|interview|announcement|dialogue|scene)\b/i;
 
+// ─── Track details from YouTube (tags, description, views), remembered for a week ───
+const DETAILS_KEY = "aurasynq_track_details_v1";
+const DETAILS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const detailsMemo = new Map();
+let detailsLoaded = false;
+const loadDetails = () => {
+  if (detailsLoaded) return;
+  detailsLoaded = true;
+  try {
+    const now = Date.now();
+    for (const [id, d] of Object.entries(JSON.parse(globalThis.localStorage?.getItem(DETAILS_KEY) || "{}"))) {
+      if (now - d.at < DETAILS_TTL_MS) detailsMemo.set(id, d);
+    }
+  } catch (e) {}
+};
+let detailsTimer = null;
+const saveDetails = () => {
+  clearTimeout(detailsTimer);
+  detailsTimer = setTimeout(() => {
+    try {
+      globalThis.localStorage?.setItem(DETAILS_KEY, JSON.stringify(Object.fromEntries([...detailsMemo.entries()].slice(-1500))));
+    } catch (e) {}
+  }, 1000);
+};
+
+// { keywords, description, views, at } or null when YouTube didn't answer (never guessed)
+async function trackDetails(yt, videoId) {
+  loadDetails();
+  if (detailsMemo.has(videoId)) return detailsMemo.get(videoId);
+  try {
+    const info = await yt.getBasicInfo(videoId, "WEB");
+    const d = {
+      keywords: (info.basic_info?.keywords || []).slice(0, 40),
+      description: String(info.basic_info?.short_description || "").slice(0, 800),
+      views: Number.isFinite(info.basic_info?.view_count) ? info.basic_info.view_count : null,
+      at: Date.now(),
+    };
+    detailsMemo.set(videoId, d);
+    saveDetails();
+    return d;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ─── Nightly trend data (scripts/trend-snapshot.mjs): momentum, views, audio language ───
+// The phone reads the website's /trend-data.json, the server its own copy; null when unavailable
+// (then momentum is "unknown", never invented).
+const TREND_STALE_MS = 72 * 60 * 60 * 1000; // older than 3 days: not used
+let trendLoader = null;
+let trendCache = null;
+export function setTrendDataLoader(fn) { trendLoader = fn; trendCache = null; }
+async function trendData() {
+  if (!trendLoader) return null;
+  if (trendCache && Date.now() - trendCache.at < CHART_TTL_MS) return trendCache.promise;
+  const fresh = (d) => d?.songs && d.generatedAt && Date.now() - Date.parse(d.generatedAt) < TREND_STALE_MS;
+  const promise = Promise.resolve().then(trendLoader).then((d) => (fresh(d) ? d : null)).catch(() => null);
+  trendCache = { at: Date.now(), promise };
+  return promise;
+}
+
+// ─── Chart playlists ───
 const chartIndex = new Map(); // country -> { at, promise }
 const playlistCache = new Map(); // id -> { at, promise }
 
 // The charts page lists the chart playlists; find them by title so new ids are picked up
-async function chartPlaylists(yt, country) {
+export async function chartPlaylists(yt, country) {
   const hit = chartIndex.get(country);
   if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.promise;
   const promise = (async () => {
@@ -127,10 +113,13 @@ function cleanChartTrack(track) {
   const { song, film } = parseTitle(raw);
   const parts = raw.split(/\s[|]\s/).map((p) => p.trim());
   const album = film || (parts.length > 1 && !/@|official|music|records|sony|saregama|think|lahari|aditya|t-series|tips/i.test(parts[1]) ? parts[1] : "");
-  return { ...track, title: film ? `${song} (From "${film}")` : song, ...(album && !track.album ? { album } : {}) };
+  // Keep a language marker ("(Telugu)") the cleaning would remove: it's evidence
+  const marker = explicitLanguage(raw);
+  const title = film ? `${song} (From "${film}")` : song;
+  return { ...track, title: marker && !explicitLanguage(title) ? `${title} (${marker[0].toUpperCase()}${marker.slice(1)})` : title, ...(album && !track.album ? { album } : {}) };
 }
 
-async function playlistTracks(yt, id) {
+export async function playlistTracks(yt, id) {
   if (!id) return [];
   const hit = playlistCache.get(id);
   if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.promise;
@@ -143,49 +132,127 @@ async function playlistTracks(yt, id) {
   return promise;
 }
 
-const fuse = (lists, count) => collapseDuplicates(reciprocalRankFusion(lists.filter((l) => l.tracks.length), 20)
-  .map(({ track, fused }) => ({ track, score: fused })))
-  .slice(0, count)
-  .map(({ track }) => ({ ...track, trending: true }));
+// Every song on the given charts, with its positions: [{ track, charts: [{ chart, rank }] }]
+function candidatesFrom(named) {
+  const byId = new Map();
+  for (const { chart, tracks } of named) {
+    tracks.forEach((track, rank) => {
+      if (!track?.id) return;
+      const c = byId.get(track.id) || { track, charts: [] };
+      if (!c.charts.some((x) => x.chart === chart)) c.charts.push({ chart, rank });
+      byId.set(track.id, c);
+    });
+  }
+  return [...byId.values()];
+}
 
-// Trending in one language: its weekly chart first, plus the country's trending/daily charts'
-// songs in that language (identified by the language classifier)
+// ─── Diagnostics: why each candidate was accepted or not (last run per chart kind) ───
+const diagnostics = new Map();
+export const trendDiagnostics = (kind) => diagnostics.get(kind) || null;
+
+const ownLanguage = (track) => {
+  const r = classifyTrack(track);
+  return r.byNeighbours ? { language: null } : r;
+};
+
+const publicTrend = (standing, extra = {}) => ({ status: standing.status, regional: standing.regional, broader: standing.broader, ...extra });
+
+// ─── Trending in one language: only songs verified in that language ───
 export async function languageTrending(yt, language, { country = "IN", count = 40 } = {}) {
-  const lists = await chartPlaylists(yt, country);
-  const [weekly, trending, daily] = await Promise.all([
+  if (!POOL_LANGUAGES.includes(language)) return [];
+  const [lists, trend] = await Promise.all([chartPlaylists(yt, country), trendData()]);
+  const [weekly, trending, daily, top] = await Promise.all([
     playlistTracks(yt, lists.languages[language]).catch(() => []),
     playlistTracks(yt, lists.trending).catch(() => []),
     playlistTracks(yt, lists.daily).catch(() => []),
+    playlistTracks(yt, lists.top).catch(() => []),
   ]);
-  // Each song judged on its own evidence: a chart is exactly where one song may differ from the rest
-  // (labels guessed from neighbours in other lists don't count here)
-  const ownLanguage = (t) => {
-    const r = classifyTrack(t);
-    return r.byNeighbours ? null : r.language;
+  const candidates = candidatesFrom([
+    { chart: `weekly:${language}`, tracks: weekly },
+    { chart: "trending", tracks: trending },
+    { chart: "daily", tracks: daily },
+    { chart: "top", tracks: top },
+  ]);
+  const report = [];
+  const songTrend = (id) => trend?.songs?.[id] || null;
+  const standingOf = (c) => trendStanding(c, { kind: language, trend: songTrend(c.track.id) });
+
+  // Songs only on the national charts are checked further only if something points to this
+  // language (no point looking up 200 Hindi hits for Tamil Trending)
+  const considered = [];
+  for (const c of candidates) {
+    const onLanguageChart = c.charts.some((x) => x.chart === `weekly:${language}`);
+    const own = ownLanguage(c.track);
+    const marker = explicitLanguage(c.track.title);
+    const audio = songTrend(c.track.id)?.audioLanguage;
+    if (onLanguageChart || own.language === language || marker === language || LANGUAGE_OVERRIDES[c.track.id]?.language === language || (audio && LANGUAGE_CODES[audio.split("-")[0]] === language)) {
+      considered.push(c);
+    } else {
+      report.push({ id: c.track.id, title: c.track.title, artist: c.track.artist, accepted: false, reason: own.language ? "language mismatch" : "language uncertain", detail: own.language ? `classifier: ${own.language}` : "not on the language chart, no evidence", charts: c.charts });
+    }
+  }
+  considered.sort((a, b) => { const x = standingOf(a); const y = standingOf(b); return (y.regional + y.broader) - (x.regional + x.broader); });
+
+  // Look up details in order of standing until enough are verified (with room for duplicates)
+  const details = {};
+  const verdicts = new Map();
+  let checked = 0;
+  const verifyAll = () => {
+    const isTemplate = findTemplates(details);
+    let verified = 0;
+    for (const c of considered.slice(0, checked)) {
+      const v = verifyLanguage(c, {
+        details: details[c.track.id],
+        trend: songTrend(c.track.id),
+        override: LANGUAGE_OVERRIDES[c.track.id],
+        isTemplate,
+        classify: ownLanguage,
+      });
+      verdicts.set(c.track.id, v);
+      if (v.status === "verified" && v.language === language) verified += 1;
+    }
+    return verified;
   };
-  // From the general (all-language) charts, only songs whose own evidence clearly says so
-  const inLanguage = (tracks) => tracks.filter((t) => {
-    const r = classifyTrack(t);
-    return !r.byNeighbours && r.language === language && (r.confidence ?? 1) >= 0.75;
+  while (checked < considered.length) {
+    const batch = considered.slice(checked, checked + 8);
+    const got = await Promise.all(batch.map((c) => trackDetails(yt, c.track.id)));
+    batch.forEach((c, i) => { if (got[i]) details[c.track.id] = got[i]; });
+    checked += batch.length;
+    if (verifyAll() >= Math.ceil(count * 1.25)) break;
+  }
+  verifyAll();
+
+  const eligible = [];
+  considered.forEach((c, i) => {
+    const base = { id: c.track.id, title: c.track.title, artist: c.track.artist, charts: c.charts };
+    if (i >= checked) { report.push({ ...base, accepted: false, reason: "not checked", detail: "enough songs were verified first" }); return; }
+    const v = verdicts.get(c.track.id);
+    const lang = { language: v.language, secondary: v.secondary, confidence: v.confidence, status: v.status, method: v.method, sources: v.sources };
+    if (v.status !== "verified") report.push({ ...base, accepted: false, reason: v.status === "conflict" ? "language conflict" : "language uncertain", detail: v.reason, lang });
+    else if (v.language !== language) report.push({ ...base, accepted: false, reason: "language mismatch", detail: `verified ${v.language}`, lang });
+    else eligible.push({ candidate: c, standing: standingOf(c), keywords: details[c.track.id]?.keywords || [], lang });
   });
-  // Even a language's chart holds dubbed versions ("[Hindi]", "(Telugu)") and other-language hits:
-  // keep the songs that are in the language, or that nothing marks as another one
-  const weeklyInLanguage = weekly.filter((t) => {
-    const lang = ownLanguage(t);
-    return !lang || lang === language;
-  });
-  const ranked = fuse([
-    { tracks: weeklyInLanguage, weight: 1.3 },
-    { tracks: inLanguage(trending), weight: 1.1 },
-    { tracks: inLanguage(daily), weight: 0.9 },
-  ], count * 2);
-  // Last check, from YouTube's own tags and description of each song
-  return filterByLanguage(yt, language, ranked, count, ownLanguage);
+
+  const isTemplate = findTemplates(details);
+  eligible.forEach((e) => { e.template = isTemplate(e.keywords); });
+  eligible.sort((a, b) => (b.standing.regional + b.standing.broader) - (a.standing.regional + a.standing.broader));
+  const { kept, dropped } = collapseVersions(eligible);
+  dropped.forEach(({ item, of, reason }) => report.push({ id: item.candidate.track.id, title: item.candidate.track.title, artist: item.candidate.track.artist, accepted: false, reason: "duplicate", detail: `${reason}: ${of.title}`, charts: item.candidate.charts }));
+  const out = kept.slice(0, count);
+  out.forEach(({ candidate, standing, lang }) => report.push({ id: candidate.track.id, title: candidate.track.title, artist: candidate.track.artist, accepted: true, reason: "trending, verified language", detail: lang.method, lang, charts: candidate.charts, standing }));
+  diagnostics.set(language, { at: Date.now(), country, candidates: candidates.length, checked, eligible: out.length, report });
+  return out.map(({ candidate, standing, lang }) => ({
+    ...candidate.track,
+    trending: true,
+    trend: publicTrend(standing, { charts: candidate.charts, language: lang.language, languageStatus: lang.status, languageMethod: lang.method, languageConfidence: lang.confidence }),
+  }));
 }
 
-// Trending now in the country, leaning toward the listener's languages
+// ─── Trending now in the country ───
+// The national charts (broader) and the weekly charts of the listener's languages (regional).
+// Every song is on an official chart; ranking for the listener is done afterwards.
 export async function trendingNow(yt, { country = "IN", languages = [], count = 40 } = {}) {
-  const lists = await chartPlaylists(yt, country);
+  const [lists, trend] = await Promise.all([chartPlaylists(yt, country), trendData()]);
   const regional = languages.filter((l) => lists.languages[l]).slice(0, 2);
   const [trending, daily, top, ...weekly] = await Promise.all([
     playlistTracks(yt, lists.trending).catch(() => []),
@@ -193,12 +260,37 @@ export async function trendingNow(yt, { country = "IN", languages = [], count = 
     playlistTracks(yt, lists.top).catch(() => []),
     ...regional.map((l) => playlistTracks(yt, lists.languages[l]).catch(() => [])),
   ]);
-  return fuse([
-    { tracks: trending, weight: 1.3 },
-    { tracks: daily, weight: 1.1 },
-    { tracks: top, weight: 0.7 },
-    ...weekly.map((tracks) => ({ tracks, weight: 0.9 })),
-  ], count);
+  const candidates = candidatesFrom([
+    { chart: "trending", tracks: trending },
+    { chart: "daily", tracks: daily },
+    { chart: "top", tracks: top },
+    ...regional.map((l, i) => ({ chart: `weekly:${l}`, tracks: weekly[i] })),
+  ]);
+  const items = candidates
+    .map((c) => ({ candidate: c, standing: trendStanding(c, { kind: "now", regionalLanguages: regional, trend: trend?.songs?.[c.track.id] }), keywords: [] }))
+    .sort((a, b) => (b.standing.regional + b.standing.broader) - (a.standing.regional + a.standing.broader));
+  // Possible re-uploads under another title share a main artist: only those need their tags
+  // (remembered for a week, so this is usually free)
+  const mainArtist = (t) => String(t.artist || "").split(/,|&/)[0].trim().toLowerCase();
+  const perArtist = new Map();
+  items.slice(0, count * 2).forEach((i) => { const a = mainArtist(i.candidate.track); perArtist.set(a, (perArtist.get(a) || 0) + 1); });
+  const suspects = items.slice(0, count * 2).filter((i) => perArtist.get(mainArtist(i.candidate.track)) > 1).slice(0, 40);
+  const got = await Promise.all(suspects.map((i) => trackDetails(yt, i.candidate.track.id)));
+  suspects.forEach((i, k) => { i.keywords = got[k]?.keywords || []; });
+  const isTemplate = findTemplates(Object.fromEntries(suspects.map((i, k) => [i.candidate.track.id, got[k]]).filter(([, d]) => d)));
+  suspects.forEach((i) => { i.template = isTemplate(i.keywords); });
+  const { kept, dropped } = collapseVersions(items);
+  const out = kept.slice(0, count);
+  diagnostics.set("now", {
+    at: Date.now(), country, regionalLanguages: regional, candidates: candidates.length, eligible: out.length,
+    report: [
+      ...out.map(({ candidate, standing }) => ({ id: candidate.track.id, title: candidate.track.title, artist: candidate.track.artist, accepted: true, reason: "on an official chart", charts: candidate.charts, standing })),
+      ...dropped.map(({ item, of, reason }) => ({ id: item.candidate.track.id, title: item.candidate.track.title, accepted: false, reason: "duplicate", detail: `${reason}: ${of.title}` })),
+    ],
+  });
+  return out.map(({ candidate, standing }) => ({
+    ...candidate.track,
+    trending: true,
+    trend: publicTrend(standing, { charts: candidate.charts }),
+  }));
 }
-
-export const chartLanguageKey = (language) => normalize(language);

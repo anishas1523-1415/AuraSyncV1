@@ -3,8 +3,11 @@
 // reaction videos) and its radio for "more like this". In the Android app both run on the phone;
 // on the website, and as the app's fallback, through /api/search.
 import { apiUrl, isMobileApp } from "@/lib/api";
-import { getProfile, seedFromLibrary, tasteVersion } from "@/lib/ir/profile";
-import { forYou, personalize, pickSeeds, pickChartSongs } from "@/lib/ir/recommend";
+import { getProfile, getIntent, seedFromLibrary, tasteVersion, judgedCount, lastJudged, isRejected } from "@/lib/ir/profile";
+import { forYou, personalize, pickSeeds } from "@/lib/ir/recommend";
+import { rankTrending, spreadOut } from "@/lib/ir/trending";
+import { trackFeatures } from "@/lib/ir/classify";
+import { cosine } from "@/lib/ir/rank";
 import { regionalLanguages } from "@/lib/ir/signals";
 import { momentPicks } from "@/lib/ir/recommend";
 import { normalize } from "@/lib/ir/text";
@@ -89,7 +92,8 @@ const chartPool = (kind) => (kind === "now" ? 80 : 56);
 
 export function chartSongs(kind, { fresh = false } = {}) {
   const languages = regionalLanguages(getProfile());
-  const key = `chart:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
+  // "chart2": results carry the trending engine's verdicts (trend); older saved lists don't
+  const key = `chart2:${kind}:${kind === "now" ? languages.join(",") : ""}:${chartPool(kind)}`;
   return cached(key, () => lookup(
     (m) => m.chartSongs(kind, { country: country(), languages, count: chartPool(kind) }),
     { chart: kind, country: country(), langs: languages.join(",") },
@@ -356,19 +360,48 @@ function rememberSeeds(key, chosen) {
   writeJSON(SEEDS_KEY, all);
 }
 
-// A page of a chart (Trending, a language's chart): each Sync shows the chart songs this list
-// showed longest ago (never-shown first), in chart rank order (top hits first); opening again within
-// the hour shows the same. The phone's larger chart pool keeps pages changing.
+// A page of a chart (Trending, a language's Trending). Only songs the trending engine accepted
+// (charts.js: on an official chart; for a language, verified in it) are ever shown. They are ranked
+// for this listener (regional / personal / broader / discovery, see ir/trending.js), spread out so no
+// artist or film dominates; the top third stays, the rest rotates on each Sync. Fewer
+// eligible songs than `count`: fewer are shown. Nothing else is ever added.
+const rankings = new Map(); // kind -> last ranking, for diagnostics
 export async function chartPage(kind, count, { fresh = false } = {}) {
   const key = `chartpage:${kind}`;
   const reuse = recentList(key, fresh);
   if (reuse) return reuse;
-  const chart = await chartSongs(kind, { fresh: false });
-  if (chart.length < count) return [];
-  const rank = new Map(chart.map((t, i) => [t.id, i]));
-  const candidates = preferUnseen(key, chart, Math.min(chart.length, Math.round(count * 1.6)))
-    .sort((a, b) => rank.get(a.id) - rank.get(b.id));
-  return showList(key, pickChartSongs(candidates, count).sort((a, b) => rank.get(a.id) - rank.get(b.id)));
+  const chart = (await chartSongs(kind, { fresh: false })).filter((t) => t?.trending && t.trend);
+  if (!chart.length) return [];
+  const intent = getIntent();
+  const ranked = spreadOut(rankTrending(
+    chart.map((track) => ({ track, standing: { regional: track.trend.regional || 0, broader: track.trend.broader || 0 } })),
+    {
+      intentFit: intent ? (t) => cosine(intent, trackFeatures(t)) : null,
+      judged: judgedCount(),
+      heard: (id) => !!lastJudged(id),
+      rejected: isRejected,
+    },
+  ));
+  rankings.set(kind, { at: Date.now(), ranked });
+  const order = new Map(ranked.map((r, i) => [r.track.id, i]));
+  // The top third is always the strongest trending songs for this listener; the rest rotates on each
+  // Sync (never-shown first), so the hottest songs aren't pushed out just because they were seen
+  const all = ranked.map((r) => r.track);
+  const head = all.slice(0, Math.ceil(count / 3));
+  const page = [...head, ...preferUnseen(key, all.slice(head.length), count - head.length)].sort((a, b) => order.get(a.id) - order.get(b.id));
+  return showList(key, page);
+}
+
+if (typeof window !== "undefined") window.__auraTrending = { explain: (kind) => explainTrending(kind) };
+
+// Why each song is where it is: the engine's verdicts (accepted / rejected and why) and the ranking
+export async function explainTrending(kind) {
+  const { trendDiagnostics } = await import("@/lib/ir/charts");
+  const ranking = rankings.get(kind);
+  return {
+    engine: trendDiagnostics(kind),
+    ranking: ranking && { at: ranking.at, weights: ranking.ranked[0]?.weights, songs: ranking.ranked.map((r) => ({ title: r.track.title, score: r.score, parts: r.parts, status: r.track.trend?.status, rejected: r.rejected })) },
+  };
 }
 
 // Personal mix: songs that the radios of the listener's favourites (from every side of their

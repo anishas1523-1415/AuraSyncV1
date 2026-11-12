@@ -118,26 +118,6 @@ export function personalize(tracks, { count = 25, trending = null } = {}) {
   return diversify(scored, { lambda: 0.8, count, features: trackFeatures }).map((p) => p.track);
 }
 
-// ─── Charts (Trending, a language's chart): which chart songs this listener sees ───
-// Still the chart: songs are shown in chart rank order and higher-ranked songs are favoured, but among
-// the candidates, songs that fit the listener's taste and current mood win places, and songs they
-// keep rejecting are left out.
-export function pickChartSongs(candidates, count) {
-  const intent = getIntent();
-  const languages = regionalLanguages(getProfile());
-  const kept = candidates.filter((t) => !isRejected(t));
-  if (!intent || kept.length <= count) return kept.slice(0, count);
-  classifyList(kept);
-  return kept
-    .map((track, i) => ({
-      track,
-      score: 1 / (1 + i * 0.05) + 0.6 * cosine(intent, trackFeatures(track)) + 0.5 * regionalScore(track, languages),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, count)
-    .map((p) => p.track);
-}
-
 // Which seeds of a category suit the listener: language-specific seeds follow their languages
 const SEED_LANGUAGES = ["tamil", "hindi", "telugu", "malayalam", "kannada", "english", "punjabi", "bollywood"];
 

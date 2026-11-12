@@ -214,6 +214,12 @@ export function affinity(track, profile = getProfile()) {
   return profile ? cosine(profile, trackFeatures(track)) : 0;
 }
 
+// How many songs the listener has judged (how well the app knows them)
+export function judgedCount() {
+  if (typeof window === "undefined") return 0;
+  return Object.keys(load().tracks).length;
+}
+
 // When a song was last judged and whether the listener liked what they heard (null if never)
 export function lastJudged(id) {
   if (typeof window === "undefined") return null;

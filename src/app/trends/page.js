@@ -8,8 +8,7 @@ import SyncButton from "@/components/SyncButton";
 import { queueFrom } from "@/lib/ir/recommend";
 import { toast } from "@/lib/toast";
 import { useReconnect } from "@/lib/network";
-import { mixSongs, chartPage } from "@/lib/catalog";
-import { TRENDS_SEEDS } from "@/app/category/[slug]/categories";
+import { chartPage } from "@/lib/catalog";
 
 const DIAL_COUNT = 12;
 const LABEL_SPACE = 22;  // the song name under a dial
@@ -134,16 +133,14 @@ export default function Trends() {
   useFloatingDials(tracks, field, dialRefs);
 
 
-  // YouTube Music's Tamil chart (weekly chart + Tamil songs trending in India), in rank order.
-  // Sync shows the next set from the chart; only if the charts can't be reached, a search mix.
+  // Tamil Trending: only trending songs verified as Tamil (the trending engine), ranked for the
+  // listener; Sync shows the next set. Never filled with other songs.
   const loadTrends = async (fresh = false) => {
     try {
       let list = [];
       try {
-        // Each Sync: the chart songs shown longest ago (never-shown first), shuffled
         list = await chartPage("tamil", DIAL_COUNT, { fresh });
       } catch (e) {}
-      if (!list.length) list = await mixSongs("trends", TRENDS_SEEDS, { count: DIAL_COUNT, fresh });
       setTracks(list);
       prefetchTracks(list);
       return list.length > 0;

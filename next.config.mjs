@@ -72,9 +72,9 @@ const nextConfig = isMobileBuild
               { key: "Access-Control-Expose-Headers", value: "Content-Length, Content-Range" },
             ],
           },
-          // Hum search settings, tuned nightly; the app fetches the latest copy
+          // Hum search settings and chart momentum, updated nightly; the app fetches the latest copy
           {
-            source: "/hum-params.json",
+            source: "/:file(hum-params.json|trend-data.json)",
             headers: [
               { key: "Access-Control-Allow-Origin", value: "*" },
               { key: "Cache-Control", value: "public, max-age=3600" },

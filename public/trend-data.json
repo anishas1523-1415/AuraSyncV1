@@ -1,0 +1,8 @@
+{
+  "generatedAt": null,
+  "country": "IN",
+  "historyDays": 0,
+  "apiData": false,
+  "songs": {},
+  "note": "Chart momentum, written nightly by scripts/trend-snapshot.mjs from daily chart snapshots. Empty until the first run."
+}
