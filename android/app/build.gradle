@@ -39,10 +39,12 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        // Shrunk exactly like release, but signed with the debug key and debuggable: installs over a
-        // debug build without wiping app data, to test the shrunk app on a phone
+        // Shrunk exactly like release and debuggable (USB debugging works), signed with the same key as
+        // the installed app (the release key when keystore.properties is present), so it installs over
+        // it without wiping app data
         qa {
             initWith debug
+            if (keystorePropsFile.exists()) signingConfig signingConfigs.release
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
